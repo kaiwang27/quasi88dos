@@ -19,3 +19,6 @@ CMakeUserPresets.json
 #cmake-build-*
 quasi88
 .cache/
+
+# DOS compiler test and port build artifacts
+/build-dos/

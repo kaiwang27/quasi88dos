@@ -150,6 +150,11 @@ static void poll_keyboard(void)
                 case 0x3d: code = KEY88_F3; break;
                 case 0x3e: code = KEY88_F4; break;
                 case 0x3f: code = KEY88_F5; break;
+                case 0x40: code = KEY88_F6; break;
+                case 0x41: code = KEY88_F7; break;
+                case 0x42: code = KEY88_F8; break;
+                case 0x43: code = KEY88_F9; break;
+                case 0x44: code = KEY88_F10; break;
                 case 0x47: code = KEY88_HOME; break;
                 case 0x48: code = KEY88_UP; break;
                 case 0x4b: code = KEY88_LEFT; break;

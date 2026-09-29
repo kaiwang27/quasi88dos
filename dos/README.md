@@ -22,7 +22,9 @@ Original files remain outside the DOSBox-X mount; no disk images are mounted.
 Each run tests missing and truncated main ROM rejection, then starts the machine
 for three frames and checks a clean exit to DOS. Logs are retained as
 `MISSING.OUT`, `SHORT.OUT`, `MACHINE.OUT`, and `RESULT.TXT` in the printed test
-directory. Use `-Cycles 12000` to repeat at the second tested CPU speed.
+directory. Generated batch command lines are capped at 120 characters to stay
+below DOS command-tail limits. Use `-Cycles 12000` to repeat at the second
+tested CPU speed.
 
 For the user's split model set, `-Mk2srDirectory` overlays `N88_1.ROM`,
 `N88_2.ROM`, `N88_3.ROM`, and `KANJI2.ROM` onto the base ROM copy and renames
@@ -49,8 +51,8 @@ QUASI88 -noconfig -nosaveconfig -v2 -romdir ROM -verbose 1 -dosvga -dosframes 0
 `-dosvga` selects BIOS mode 12h and converts the core's 8-bit rendered frame to
 the standard 16-color VGA palette, then writes the four planes through VGA
 memory. `-dosframes 0` runs until QUASI88 exits; the default remains three
-frames for repeatable headless tests. BIOS keyboard polling maps ASCII and
-selected special keys into the core and is intended for menu/BASIC interaction.
+frames for repeatable headless tests. BIOS keyboard polling maps ASCII, F1-F10,
+and selected special keys into the core and is intended for menu/BASIC interaction.
 F12 maps to the PC-88 system menu, and F11 maps to system status. Input uses
 the enhanced BIOS keyboard services (INT 16h AH=10h/11h/12h) so F11/F12 are
 available on an enhanced AT keyboard. Both common scan-code forms for those
@@ -345,7 +347,8 @@ the screenshot writer and DOS file output, not colors from a real ROM or the
 interactive menu action on physical DOS.
 
 2026-09-29: The screenshot test passed under DOSBox-X at 3,000 fixed cycles.
-It wrote the expected 640x400 24-bit BMP (768,054 bytes). Interactive screenshot
+It wrote the expected 640x400 24-bit BMP (768,054 bytes). The combined VGA,
+state, and screenshot tests also passed at 12,000 cycles. Interactive screenshot
 quality and physical DOS output remain unverified.
 
 ### Port validation record
@@ -408,6 +411,10 @@ gone.
 2026-09-29 launcher follow-up: The user confirmed `RUN_Q88.BAT` now works on the
 physical PC. It is a two-line DOS batch with CRLF line endings. DOSBox-X also
 accepted the batch syntax and created the keyboard and mouse logs.
+
+2026-09-29 keyboard follow-up: The DOS BIOS mapper now forwards F6-F10 to the
+existing PC-88 function-key codes. This compiles with Open Watcom; physical
+behavior remains for the next hardware test.
 
 ## Hello World compiler smoke test
 

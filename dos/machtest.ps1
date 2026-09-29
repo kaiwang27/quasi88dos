@@ -53,9 +53,9 @@ if ($RomDirectory) {
     # Default scheduling switches CPUs on PIO; these simple fixtures have no
     # PIO handshake, so use the existing interleaved CPU mode for this test.
     $checkOption = '-doscheck -cpu 2'
+    if ($VgaTest) { $checkOption += ' -dosvga -dosvideochk -dosmouselog' }
     if ($StateTest) { $checkOption += ' -dosstatechk' }
     if ($SnapshotTest) { $checkOption += ' -dossnapchk' }
-    if ($VgaTest) { $checkOption += ' -dosvga -dosvideochk -dosmouselog' }
 }
 if ($DiskTest) {
     # One-image D88 with a single 256-byte sector (0..255) for FDC tests.
@@ -79,11 +79,11 @@ if ($DiskTest) {
     Copy-Item (Join-Path $testDir 'BASE.D88') (Join-Path $testDir 'RO.D88')
     [IO.File]::WriteAllBytes((Join-Path $testDir 'BAD.D88'), (New-Object byte[] 31))
     $diskTestCommands = @"
-QUASI88 -noconfig -nosaveconfig -v2 -romdir ROM -verbose 1 -dosframes $Frames $checkOption -dosdiskchk RW.D88 > DISKRW.OUT
+QUASI88 -dosframes $Frames $checkOption -dosdiskchk RW.D88 > DISKRW.OUT
 if errorlevel 1 goto fail
-QUASI88 -noconfig -nosaveconfig -v2 -romdir ROM -verbose 1 -dosframes $Frames $checkOption -ro -dosdiskchk RO.D88 > DISKRO.OUT
+QUASI88 -dosframes $Frames $checkOption -ro -dosdiskchk RO.D88 > DISKRO.OUT
 if errorlevel 1 goto fail
-QUASI88 -noconfig -nosaveconfig -v2 -romdir ROM -verbose 1 -dosframes $Frames $checkOption -dosdiskchk BAD.D88 > DISKBAD.OUT
+QUASI88 -dosframes $Frames $checkOption -dosdiskchk BAD.D88 > DISKBAD.OUT
 if not errorlevel 1 goto fail
 "@
 } else {
@@ -91,11 +91,11 @@ if not errorlevel 1 goto fail
 }
 @"
 @echo off
-QUASI88 -noconfig -nosaveconfig -v2 -romdir EMPTY > MISSING.OUT
+QUASI88 -romdir EMPTY > MISSING.OUT
 if not errorlevel 1 goto fail
-QUASI88 -noconfig -nosaveconfig -v2 -romdir SHORT > SHORT.OUT
+QUASI88 -romdir SHORT > SHORT.OUT
 if not errorlevel 1 goto fail
-QUASI88 -noconfig -nosaveconfig -v2 -romdir ROM -verbose 1 -dosframes $Frames $checkOption > MACHINE.OUT
+QUASI88 -dosframes $Frames $checkOption > MACHINE.OUT
 if errorlevel 1 goto fail
 $diskTestCommands
 echo PASS > RESULT.TXT
@@ -105,6 +105,8 @@ echo FAIL > RESULT.TXT
 :end
 exit
 "@ | Set-Content (Join-Path $testDir 'RUN.BAT') -Encoding ASCII
+$tooLong = Get-Content (Join-Path $testDir 'RUN.BAT') | Where-Object { $_.Length -gt 120 }
+if ($tooLong) { throw "Generated DOS command exceeds the safe 120-character limit: $tooLong" }
 $config = Join-Path $testDir 'TEST.CONF'
 @"
 [dosbox]

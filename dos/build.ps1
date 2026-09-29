@@ -28,6 +28,7 @@ try {
     $env:WATCOM = $WatcomRoot
     $env:INCLUDE = Join-Path $WatcomRoot 'h'
     $env:PATH = "$hostBin;$(Join-Path $WatcomRoot 'binw');$oldPath"
+    $assemblerPath = Join-Path $hostBin 'wasm.exe'
     if ($Target -eq 'Hello') {
         & $compilerPath '-y' '-bt=dos' '-l=causeway' '-3r' '-w4' '-we' '-fe=HELLO.EXE' '-fo=HELLO.OBJ' '-fm=HELLO.MAP' (Join-Path $PSScriptRoot 'hello.c')
         if ($LASTEXITCODE -ne 0) { throw "DOS build failed with exit code $LASTEXITCODE" }
@@ -45,8 +46,12 @@ try {
             foreach ($source in (Get-Content (Join-Path $PSScriptRoot 'sources.txt'))) {
                 $object = 'Q{0:D3}.OBJ' -f $index++
                 $warningOptions = @()
-                if ($source -like 'src/*depend/dos/*') { $warningOptions = @('-we') }
-                & $compilerPath '-y' '-c' '-bt=dos' '-3r' '-mf' '-j' '-w4' @warningOptions @includes ('-fo=' + $object) (Join-Path $repoRoot $source)
+                if ($source.EndsWith('.asm')) {
+                    & $assemblerPath '-bt=dos' '-3p' '-mf' ('-fo=' + $object) (Join-Path $repoRoot $source)
+                } else {
+                    if ($source -like 'src/*depend/dos/*') { $warningOptions = @('-we') }
+                    & $compilerPath '-y' '-c' '-bt=dos' '-3r' '-mf' '-j' '-w4' @warningOptions @includes ('-fo=' + $object) (Join-Path $repoRoot $source)
+                }
                 if ($LASTEXITCODE -ne 0) { throw "DOS compile failed: $source" }
                 $linkLines += "file $object"
             }

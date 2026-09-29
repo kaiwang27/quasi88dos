@@ -90,4 +90,5 @@ src/osdepend/dos/file-op.c
 src/sysdepend/dos/main.c
 src/sysdepend/dos/graph.c
 src/sysdepend/dos/event.c
+src/sysdepend/dos/keyboard_irq.asm
 src/sysdepend/dos/wait.c

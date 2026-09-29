@@ -8,7 +8,8 @@ param(
     [switch]$DiskTest,
     [switch]$StateTest,
     [switch]$SnapshotTest,
-    [switch]$ConfigTest
+    [switch]$ConfigTest,
+    [switch]$JoystickMode
 )
 $ErrorActionPreference = 'Stop'
 if ($Mk2srDirectory -and -not $RomDirectory) { throw '-Mk2srDirectory requires the base -RomDirectory.' }
@@ -62,11 +63,12 @@ if ($RomDirectory) {
     if ($VgaTest) { $checkOption += ' -dosvga -dosvideochk -dosmouselog' }
     if ($StateTest) { $checkOption += ' -dosstatechk' }
     if ($SnapshotTest) { $checkOption += ' -dossnapchk' }
-    if ($ConfigTest) {
-        $checkOption += ' -doscfgchk'
-        $configSaveOption = '-saveconfig'
-    }
+if ($ConfigTest) {
+    $checkOption += ' -doscfgchk'
+    $configSaveOption = '-saveconfig'
 }
+}
+if ($JoystickMode) { $checkOption += ' -joystick' }
 if ($DiskTest) {
     # One-image D88 with a single 256-byte sector (0..255) for FDC tests.
     $fixture = New-Object byte[] 960
@@ -152,6 +154,9 @@ try {
     }
     if (-not $RomDirectory -and $output -notmatch 'synthetic CPU markers: PASS') {
         throw 'Synthetic CPU execution check failed.'
+    }
+    if ($JoystickMode -and $output -notmatch 'PC-88 joystick mode selected') {
+        throw 'Joystick mode was not selected; inspect MACHINE.OUT.'
     }
     if ($VgaTest -and ($output -notmatch 'VGA plane readback: PASS' -or
                        $output -notmatch 'original video mode restored: PASS')) {

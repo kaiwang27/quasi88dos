@@ -1,7 +1,7 @@
 # DOS port bring-up
 
 The DOS build links the full machine into `QUASI88.EXE`. It has an optional VGA
-640x480 16-color display, BIOS-polled keyboard, and DOS mouse-driver path, as
+640x480 16-color display, IRQ1 scan-code keyboard, and DOS mouse-driver path, as
 well as bounded headless startup checks. `Q88TEST.EXE` separately exercises
 the Z80 core and file backend. The original Hello World test remains available.
 
@@ -51,23 +51,26 @@ QUASI88 -saveconfig -v2 -romdir ROM -verbose 1 -dosvga -dosframes 0
 `-dosvga` selects BIOS mode 12h and converts the core's 8-bit rendered frame to
 the standard 16-color VGA palette, then writes the four planes through VGA
 memory. `-dosframes 0` runs until QUASI88 exits; the default remains three
-frames for repeatable headless tests. BIOS keyboard polling maps ASCII, F1-F10,
-and selected special keys into the core and is intended for menu/BASIC interaction.
-F12 maps to the PC-88 system menu, and F11 maps to system status. Input uses
-the enhanced BIOS keyboard services (INT 16h AH=10h/11h/12h) so F11/F12 are
-available on an enhanced AT keyboard. Both common scan-code forms for those
-keys are accepted. Input is
-polled once per emulated frame, so simultaneous-key gaming input is not yet
-supported. One standard PC game-port joystick is detected with a 10 ms timed
-probe; its two active-low buttons map to pad A/B. Analog axes and calibration
-are not implemented. Detection is reported on startup, and PCs without a
-responding joystick continue normally.
+frames for repeatable headless tests. The protected-mode IRQ1 handler captures
+raw AT make/break scan codes into a locked ring buffer; scan translation and
+QUASI88 event delivery happen in the main loop. Held keys remain down until
+their break code arrives, without BIOS typematic-buffer polling. F1-F12,
+modifiers, navigation, and Ctrl+Q shutdown are translated from scan codes.
+While QUASI88 is active it owns IRQ1, so DOS BIOS keyboard input is unavailable
+to other programs; the previous vector is restored on normal exit. One standard
+PC game-port joystick is detected and its X/Y axis timers are measured against
+the read-only PIT channel 0 counter. The centered stick position is sampled at
+startup; keep the stick centered while launching. In `-joystick` mode, analog
+movement maps to PC-88 directions with a calibrated dead zone, and its two
+active-low buttons map to pad A/B. Reads are bounded to 5 ms and do not
+reprogram the system timer. PCs without a responding joystick continue
+normally.
 Normal exit restores the prior BIOS video mode. Avoid Ctrl-C or forced process
 termination if you want the display mode restored.
 
 For physical keyboard and mouse diagnosis, run `RUN_Q88.BAT` from the folder
 containing `QUASI88.EXE` and `ROM`. The batch contains only the emulator command
-and `PAUSE`. It records BIOS keyboard events in `KEYS.LOG` and DOS mouse-driver
+and `PAUSE`. It records translated IRQ1 make/break events in `KEYS.LOG` and DOS mouse-driver
 availability, pointer coordinates, and button changes in `MOUSE.LOG`. The mouse path polls the
 installed INT 33h driver while VGA is active; without a driver, keyboard
 operation continues normally. Left, right, and middle buttons map to QUASI88's
@@ -92,22 +95,37 @@ value in the executable, enables `-saveconfig`, and verifies the setting was
 written back. The synthetic fixture is used so no user ROMs or settings are
 changed.
 
-### Game-port joystick button input
+### Game-port joystick input
 
-One standard PC game-port joystick is detected by triggering port `201h` and
-requiring an axis input to transition from high to low within a PIT-timed 10 ms
-window. Its two active-low buttons map to PC-88 pad A/B and are polled once per
-emulated frame. The DOSBox-X machine test sets `joysticktype=none` and requires
-the startup diagnostic to say `not detected`, checking that missing optional
-hardware does not block startup. Analog axes, calibration, and a second
-controller are not supported.
+One standard PC game-port joystick is detected by measuring the X/Y axis RC
+timers at port `201h` against the read-only PIT channel 0 counter. It samples
+and averages the centered stick position at startup; keep the stick centered
+while launching. In `-joystick` mode, axis movement maps to PC-88 directions
+with a calibrated dead zone, and its two active-low buttons map to pad A/B.
+Reads are bounded to 5 ms per sample and do not reprogram the system timer.
+For the physical game port, a shorter Y timer maps to up. DOSBox-X passes the
+host joystick's Y value directly into its emulated timer, and that host input
+was observed to have the opposite polarity; do not use it to override the
+physical-port mapping. The DOSBox-X machine test sets `joysticktype=none` and
+checks that missing optional hardware does not block startup. A second
+controller and additional buttons are not supported.
+
+Check joystick-mode startup without a host joystick using the synthetic ROMs:
+
+```powershell
+.\dos\machtest.ps1 -DosBoxX D:\DOSBox-X\dosbox-x.exe -JoystickMode
+```
+
+This confirms the `-joystick` mode is selected and the emulator still returns
+cleanly when no game-port device is detected; it does not simulate stick axes.
 
 2026-09-29: Open Watcom/CauseWay machine build succeeded. DOSBox-X tests with
 the virtual joystick disabled passed at 3,000 and 12,000 fixed cycles; each
 reported no joystick and returned cleanly to DOS. The 12,000-cycle VGA test
 also passed plane readback and video-mode restoration. Physical game-port
-button behavior remains untested; center the stick before launch and check
-buttons A/B if a standard game-port controller is available.
+input was tested, and an attempted Y-axis reversal made up/down wrong on the
+physical PC. The mapping has been returned to shorter-timer-is-up; center the
+stick before launch, run with `-joystick`, and recheck all directions and A/B.
 
 ### Scope and ROM checks
 
@@ -125,8 +143,8 @@ can be filled with `FF`, and the built-in font can substitute for `FONT.ROM`.
 Passing startup therefore does not prove ROM completeness or a working BASIC
 prompt. Use `-verbose 1` to see each ROM loading result.
 
-Game-port joystick support currently maps only buttons A/B for one controller;
-analog axes and calibration are not implemented. Audio output is not
+Game-port joystick support maps one controller's X/Y axes and buttons A/B;
+calibration is sampled at startup. Audio output is not
 implemented. Mouse input requires an installed DOS INT 33h driver and is polled
 once per emulated frame. Frame pacing reads the
 BIOS tick and PIT channel 0 counter without reprogramming the timer or hooking
@@ -209,9 +227,53 @@ writable DOS directory. Run `VGA_TEST` for bounded video/readback and clean
 return checks, then `RUN_Q88` for interactive use. Both pause after QUASI88
 returns so the result remains visible. A 386-or-newer CPU is required; tested
 emulated RAM is 16 MB, not an established minimum. Report CPU, RAM, DOS version,
-memory managers, ROM filenames/sizes, and the complete console output. No
-hardware result has been reported. The VGA display path is available with
-`-dosvga`; its physical VGA/i740 performance remains unverified.
+memory managers, ROM filenames/sizes, and the complete console output. The
+user has confirmed visible VGA game output on the physical PC; sustained
+performance and i740-specific behavior remain unverified.
+
+### Physical game and keyboard follow-up
+
+2026-09-29: the user reported that the Ys1 disk starts and displays its game
+screen on the physical DOS PC. Holding a key had a long initial repeat delay,
+followed by a beep from the PC when held for a long time. Replacing BIOS
+typematic-buffer polling, the machine now captures raw IRQ1 make/break scan
+codes in a 128-byte locked ring buffer; the interrupt handler is an 81-byte,
+call-free assembly routine. Event translation runs outside interrupt context,
+and the old interrupt vector is restored on normal exit. If memory locking
+fails, the prior BIOS polling path remains as a fallback. The Open Watcom
+machine build compiled and linked successfully with no warnings in the changed
+DOS C or assembly sources.
+`dos/machtest.ps1 -DosBoxX D:\DOSBox-X\dosbox-x.exe -Cycles 12000 -RomDirectory D:\88pseudorom -VgaTest`
+passed ROM preflight, three bounded frames, VGA readback, and text-mode
+restoration with the IRQ1 handler installed and then removed. This check does
+not synthesize keyboard IRQs or emulate a held key, so key mapping, repeat
+behavior, and the beep remain physical-hardware checks.
+
+The user then verified F11/F12 in DOSBox-X and found keypad directions did not
+move the Ys1 character. The raw DOS mapper had assigned non-extended keypad
+scans to cursor keys instead of `KEY88_KP_1` through `KEY88_KP_9`; these now
+match the SDL port, while E0-prefixed dedicated arrow keys retain cursor-key
+codes. The rebuilt machine passed the same ROM/VGA startup regression. Actual
+in-game movement then passed DOSBox-X and physical-machine testing. The user
+reports that the IRQ keyboard path now works perfectly on the physical PC.
+
+### Analog game-port joystick
+
+The DOS event backend now measures game-port X/Y RC timers against PIT channel 0,
+averages a centered stick position at startup, applies a dead zone, and sends
+direction plus A/B pad transitions while `-joystick` mode is selected. Timer
+reads do not reprogram PIT channel 0, and each sample is capped at 5 ms. The
+Ys1 test batch now selects `-joystick`. Open Watcom compilation passed without
+warnings in DOS sources. DOSBox-X passed synthetic startup with `-JoystickMode`
+and no host joystick, plus the real-ROM VGA regression at 12,000 cycles. Those
+tests do not emulate analog game-port movement. The user tested through a
+DOSBox-X host joystick/gamepad and reported that Y movement was inverted. The
+host-gamepad path reports the opposite Y polarity from the physical game port.
+An attempted reversal fixed the host-gamepad test but inverted Y on the
+physical PC, so the code was restored to the physical-port polarity. The user
+confirmed that build works correctly on the physical PC and reported that
+save/load also passes. DOSBox-X's no-device check cannot validate analog
+direction.
 
 ## Build and test the initial port
 

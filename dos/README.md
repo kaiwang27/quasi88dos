@@ -59,9 +59,10 @@ polled once per emulated frame, so simultaneous-key gaming input is not yet
 supported. Normal exit restores the prior BIOS video mode. Avoid Ctrl-C or
 forced process termination if you want the display mode restored.
 
-For physical keyboard and mouse diagnosis, run `RUN_Q88.BAT`. It records BIOS
-keyboard events in `KEYS.LOG` and DOS mouse-driver availability, pointer
-coordinates, and button changes in `MOUSE.LOG`. The mouse path polls the
+For physical keyboard and mouse diagnosis, run `RUN_Q88.BAT` from the folder
+containing `QUASI88.EXE` and `ROM`. The batch contains only the emulator command
+and `PAUSE`. It records BIOS keyboard events in `KEYS.LOG` and DOS mouse-driver
+availability, pointer coordinates, and button changes in `MOUSE.LOG`. The mouse path polls the
 installed INT 33h driver while VGA is active; without a driver, keyboard
 operation continues normally. Left, right, and middle buttons map to QUASI88's
 existing mouse events, including toolbar clicks. Ctrl+Alt+Q requests an

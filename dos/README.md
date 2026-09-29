@@ -58,8 +58,12 @@ the enhanced BIOS keyboard services (INT 16h AH=10h/11h/12h) so F11/F12 are
 available on an enhanced AT keyboard. Both common scan-code forms for those
 keys are accepted. Input is
 polled once per emulated frame, so simultaneous-key gaming input is not yet
-supported. Normal exit restores the prior BIOS video mode. Avoid Ctrl-C or
-forced process termination if you want the display mode restored.
+supported. One standard PC game-port joystick is detected with a 10 ms timed
+probe; its two active-low buttons map to pad A/B. Analog axes and calibration
+are not implemented. Detection is reported on startup, and PCs without a
+responding joystick continue normally.
+Normal exit restores the prior BIOS video mode. Avoid Ctrl-C or forced process
+termination if you want the display mode restored.
 
 For physical keyboard and mouse diagnosis, run `RUN_Q88.BAT` from the folder
 containing `QUASI88.EXE` and `ROM`. The batch contains only the emulator command
@@ -88,6 +92,23 @@ value in the executable, enables `-saveconfig`, and verifies the setting was
 written back. The synthetic fixture is used so no user ROMs or settings are
 changed.
 
+### Game-port joystick button input
+
+One standard PC game-port joystick is detected by triggering port `201h` and
+requiring an axis input to transition from high to low within a PIT-timed 10 ms
+window. Its two active-low buttons map to PC-88 pad A/B and are polled once per
+emulated frame. The DOSBox-X machine test sets `joysticktype=none` and requires
+the startup diagnostic to say `not detected`, checking that missing optional
+hardware does not block startup. Analog axes, calibration, and a second
+controller are not supported.
+
+2026-09-29: Open Watcom/CauseWay machine build succeeded. DOSBox-X tests with
+the virtual joystick disabled passed at 3,000 and 12,000 fixed cycles; each
+reported no joystick and returned cleanly to DOS. The 12,000-cycle VGA test
+also passed plane readback and video-mode restoration. Physical game-port
+button behavior remains untested; center the stick before launch and check
+buttons A/B if a standard game-port controller is available.
+
 ### Scope and ROM checks
 
 The standard machine core, ROM loader, main/sub CPUs, video renderer, disk
@@ -104,8 +125,10 @@ can be filled with `FF`, and the built-in font can substitute for `FONT.ROM`.
 Passing startup therefore does not prove ROM completeness or a working BASIC
 prompt. Use `-verbose 1` to see each ROM loading result.
 
-Joystick and audio output are not implemented. Mouse input requires an installed
-DOS INT 33h driver and is polled once per emulated frame. Frame pacing reads the
+Game-port joystick support currently maps only buttons A/B for one controller;
+analog axes and calibration are not implemented. Audio output is not
+implemented. Mouse input requires an installed DOS INT 33h driver and is polled
+once per emulated frame. Frame pacing reads the
 BIOS tick and PIT channel 0 counter without reprogramming the timer or hooking
 interrupts. It busy-polls the hardware timer for sub-frame waits, so it uses
 the CPU while waiting; DOS has no portable high-resolution sleep path in this

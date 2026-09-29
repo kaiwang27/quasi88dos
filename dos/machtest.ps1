@@ -126,6 +126,8 @@ memsize=16
 core=normal
 cputype=386
 cycles=fixed $Cycles
+[joystick]
+joysticktype=none
 [autoexec]
 mount c .
 c:
@@ -144,6 +146,7 @@ try {
     $missing = Get-Content (Join-Path $testDir 'MISSING.OUT') -Raw
     $short = Get-Content (Join-Path $testDir 'SHORT.OUT') -Raw
     if ($result -ne 'PASS' -or $output -notmatch "completed $Frames/$Frames frames; clean shutdown" -or
+        $output -notmatch 'game-port joystick not detected' -or
         $missing -notmatch 'missing required main ROM' -or $short -notmatch 'must be 32768 bytes') {
         throw 'Machine startup/negative tests failed; inspect the output files.'
     }

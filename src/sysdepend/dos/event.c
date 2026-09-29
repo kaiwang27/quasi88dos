@@ -2,6 +2,7 @@
  * released: BASIC typing only, not independent held keys/game controls.
  */
 #include <bios.h>
+#include <conio.h>
 #include <i86.h>
 #include <stdio.h>
 #include <string.h>
@@ -9,8 +10,11 @@
 #include "event.h"
 #include "keyboard.h"
 #include "device.h"
+#include "wait.h"
 static int pressed, shift, control, remaining;
 static int mouse_available;
+static int gameport_joystick;
+static unsigned int gameport_buttons;
 static unsigned int mouse_buttons;
 static int mouse_x = 320, mouse_y = 240;
 static int last_mouse_x = 320, last_mouse_y = 240;
@@ -69,11 +73,53 @@ static void release_mouse(void)
     }
     mouse_buttons = 0;
 }
+static int probe_gameport(void)
+{
+    union wait_time start;
+    unsigned int status;
+    unsigned long polls = 0;
+    outp(0x201, 0);
+    wait_get_current_time(&start);
+    status = (unsigned int)inp(0x201);
+    if ((status & 0x03) != 0x03) return FALSE;
+    do {
+        status = (unsigned int)inp(0x201);
+        if ((status & 0x03) != 0x03) return TRUE;
+        if ((++polls & 255UL) == 0 &&
+            wait_calc_elasped_time_ms(&start) >= 10) break;
+    } while (TRUE);
+    return FALSE;
+}
+static void poll_gameport(void)
+{
+    unsigned int status, buttons, changed;
+    int i;
+    if (!gameport_joystick) return;
+    status = (unsigned int)inp(0x201);
+    buttons = (unsigned int)((~status >> 4) & 0x03);
+    changed = buttons ^ gameport_buttons;
+    for (i = 0; i < 2; ++i) {
+        if (changed & (1U << i))
+            quasi88_pad(KEY88_PAD1_A + i, (buttons & (1U << i)) != 0);
+    }
+    gameport_buttons = buttons;
+}
+static void release_gameport(void)
+{
+    int i;
+    for (i = 0; i < 2; ++i) {
+        if (gameport_buttons & (1U << i))
+            quasi88_pad(KEY88_PAD1_A + i, FALSE);
+    }
+    gameport_buttons = 0;
+}
 void event_init(void)
 {
     FILE *fp;
     pressed = shift = control = remaining = 0;
     mouse_available = FALSE;
+    gameport_joystick = FALSE;
+    gameport_buttons = 0;
     mouse_buttons = 0;
     mouse_x = 320;
     mouse_y = 240;
@@ -95,6 +141,9 @@ void event_init(void)
             int386(0x33, &regs, &regs);
         }
     }
+    gameport_joystick = probe_gameport();
+    printf("DOS: game-port joystick %s (two buttons only)\n",
+           gameport_joystick ? "detected" : "not detected");
     if (dos_mouse_log) {
         fp = fopen("MOUSE.LOG", "a");
         if (fp) {
@@ -108,8 +157,11 @@ void event_init(void)
         fclose(fp);
     }
 }
-void event_exit(void) { release_key(); release_mouse(); }
-void event_switch(void) { release_key(); release_mouse(); remaining = 0; }
+void event_exit(void) { release_key(); release_mouse(); release_gameport(); }
+void event_switch(void)
+{
+    release_key(); release_mouse(); release_gameport(); remaining = 0;
+}
 static void poll_keyboard(void)
 {
     unsigned int key, shift_status;
@@ -205,6 +257,7 @@ void event_update(void)
 {
     poll_keyboard();
     poll_mouse();
+    poll_gameport();
 }
 void event_get_mouse_pos(int *x, int *y)
 {
@@ -213,4 +266,4 @@ void event_get_mouse_pos(int *x, int *y)
 }
 int event_keylayout_change(void) { return FALSE; }
 void event_keylayout_revert(void) {}
-int event_get_joystick_num(void) { return 0; }
+int event_get_joystick_num(void) { return gameport_joystick ? 1 : 0; }

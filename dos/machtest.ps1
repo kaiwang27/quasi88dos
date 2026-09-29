@@ -4,10 +4,12 @@ param(
     [string]$RomDirectory,
     [string]$Mk2srDirectory,
     [ValidateRange(3, 600)] [int]$Frames = 3,
-    [switch]$VgaTest
+    [switch]$VgaTest,
+    [switch]$DiskTest
 )
 $ErrorActionPreference = 'Stop'
 if ($Mk2srDirectory -and -not $RomDirectory) { throw '-Mk2srDirectory requires the base -RomDirectory.' }
+if ($DiskTest -and -not $RomDirectory) { throw '-DiskTest requires real ROMs via -RomDirectory.' }
 if (-not $DosBoxX) { $DosBoxX = (Get-Command dosbox-x.exe -ErrorAction Stop).Source }
 $DosBoxX = (Resolve-Path -LiteralPath $DosBoxX).Path
 $repoRoot = Split-Path $PSScriptRoot -Parent
@@ -49,6 +51,38 @@ if ($RomDirectory) {
     $checkOption = '-doscheck -cpu 2'
     if ($VgaTest) { $checkOption += ' -dosvga -dosvideochk' }
 }
+if ($DiskTest) {
+    # One-image D88 with a single 256-byte sector (0..255) for FDC tests.
+    $fixture = New-Object byte[] 960
+    [Text.Encoding]::ASCII.GetBytes('DOS D88 TEST').CopyTo($fixture, 0)
+    $fixture[0x1c] = 0xc0
+    $fixture[0x1d] = 0x03
+    $fixture[0x20] = 0xb0
+    $fixture[0x21] = 0x02
+    $fixture[0x2b0] = 0
+    $fixture[0x2b1] = 0
+    $fixture[0x2b2] = 1
+    $fixture[0x2b3] = 1
+    $fixture[0x2b4] = 1
+    $fixture[0x2bd] = 0
+    $fixture[0x2be] = 0
+    $fixture[0x2bf] = 1
+    for ($i = 0; $i -lt 256; ++$i) { $fixture[0x2c0 + $i] = $i }
+    [IO.File]::WriteAllBytes((Join-Path $testDir 'BASE.D88'), $fixture)
+    Copy-Item (Join-Path $testDir 'BASE.D88') (Join-Path $testDir 'RW.D88')
+    Copy-Item (Join-Path $testDir 'BASE.D88') (Join-Path $testDir 'RO.D88')
+    [IO.File]::WriteAllBytes((Join-Path $testDir 'BAD.D88'), (New-Object byte[] 31))
+    $diskTestCommands = @"
+QUASI88 -noconfig -nosaveconfig -v2 -romdir ROM -verbose 1 -dosframes $Frames $checkOption -dosdiskchk RW.D88 > DISKRW.OUT
+if errorlevel 1 goto fail
+QUASI88 -noconfig -nosaveconfig -v2 -romdir ROM -verbose 1 -dosframes $Frames $checkOption -ro -dosdiskchk RO.D88 > DISKRO.OUT
+if errorlevel 1 goto fail
+QUASI88 -noconfig -nosaveconfig -v2 -romdir ROM -verbose 1 -dosframes $Frames $checkOption -dosdiskchk BAD.D88 > DISKBAD.OUT
+if not errorlevel 1 goto fail
+"@
+} else {
+    $diskTestCommands = ''
+}
 @"
 @echo off
 QUASI88 -noconfig -nosaveconfig -v2 -romdir EMPTY > MISSING.OUT
@@ -57,6 +91,7 @@ QUASI88 -noconfig -nosaveconfig -v2 -romdir SHORT > SHORT.OUT
 if not errorlevel 1 goto fail
 QUASI88 -noconfig -nosaveconfig -v2 -romdir ROM -verbose 1 -dosframes $Frames $checkOption > MACHINE.OUT
 if errorlevel 1 goto fail
+$diskTestCommands
 echo PASS > RESULT.TXT
 goto end
 :fail
@@ -100,6 +135,24 @@ try {
     if ($VgaTest -and ($output -notmatch 'VGA plane readback: PASS' -or
                        $output -notmatch 'original video mode restored: PASS')) {
         throw 'VGA memory or mode restoration check failed.'
+    }
+    if ($DiskTest) {
+        $rw = Get-Content (Join-Path $testDir 'DISKRW.OUT') -Raw
+        $ro = Get-Content (Join-Path $testDir 'DISKRO.OUT') -Raw
+        $bad = Get-Content (Join-Path $testDir 'DISKBAD.OUT') -Raw
+        $blankSize = 960
+        $appendedSize = 32 + (164 * 4) + (84 * 0x1600)
+        if ($rw -notmatch 'FDC sector read/write: PASS' -or
+            $rw -notmatch 'D88 append/write check: PASS' -or
+            $ro -notmatch 'FDC read-only sector protection: PASS' -or
+            $bad -notmatch 'Image not found' -or
+            $bad -notmatch 'D88 mounted-image check: FAIL' -or
+            (Get-Item (Join-Path $testDir 'RW.D88')).Length -ne ($blankSize + $appendedSize) -or
+            (Get-FileHash (Join-Path $testDir 'RO.D88')).Hash -ne
+                (Get-FileHash (Join-Path $testDir 'BASE.D88')).Hash) {
+            throw 'D88 writable/read-only disk checks failed; inspect DISKRW.OUT and DISKRO.OUT.'
+        }
+        Write-Host 'PASS: D88 image mount, append/write, and read-only preservation'
     }
     Write-Host "PASS: missing/truncated ROM rejection and $Frames bounded frames at $Cycles cycles"
     Write-Host "DOSBox-X total runtime: $([math]::Round($stopwatch.Elapsed.TotalSeconds, 3)) seconds"

@@ -95,8 +95,10 @@ backend. The VGA backend changes the BIOS mode and restores it on normal exit.
 The QUASI88 toolbar is visible on the reported physical PC; mouse input is
 still stubbed, so its on-screen controls cannot yet be clicked through this
 backend. No interrupt vectors, PIT, DMA, or sound registers are modified.
-Disk I/O, save states, configuration saving, and snapshots have not been
-validated as machine features. Keep writable user media outside test mounts.
+D88 image mounting, FDC sector read/write, and image-file writes now have a
+focused DOSBox-X fixture test using the core's FDC port interface. Guest-driven
+disk commands, save states, configuration saving, and snapshots remain
+unvalidated as machine features. Keep writable user media outside test mounts.
 
 ### Build and validation record
 
@@ -255,6 +257,42 @@ Build and run the focused 60-frame timer test at two DOSBox-X cycle settings:
 Both runs reported 1,083 ms for 60 periods of 18,050 microseconds. This
 validates the timer math in DOSBox-X at those settings, not frame-rate
 performance of the full emulator on physical hardware.
+
+### D88 and FDC I/O milestone
+
+Run the full-machine disk fixture with the user's split model ROM set:
+
+```powershell
+.\dos\build.ps1 -Target Machine -WatcomRoot D:\watcom
+.\dos\machtest.ps1 -DosBoxX D:\DOSBox-X\dosbox-x.exe -Cycles 12000 `
+  -RomDirectory D:\88rom -Mk2srDirectory D:\88rom\pc8801mk2sr `
+  -Frames 3 -DiskTest
+```
+
+`-DiskTest` creates a minimal D88 fixture containing one 256-byte sector and
+separate writable, read-only, and malformed copies under a fresh ignored
+`build-dos` test directory. The DOS executable exercises the FDC command,
+data, and result phases to read the sector, write a pattern, and read it back.
+On the read-only copy it verifies that a sector write is rejected and the
+original sector remains readable. The writable run also uses the core's D88
+append routine to write a second blank image, re-reads its header, and verifies
+the resulting file size. A truncated D88 must be rejected. No user disk image
+is copied or mounted by this test.
+
+For a physical-machine check, use `build-dos\disk-hardware-test-20260929`.
+Put your normal ROM set in its `ROM` subdirectory, copy the folder to a writable
+DOS directory, and run `D88TEST.BAT`. It recreates only `RW.D88` and `RO.D88`
+from the included disposable `BASE.D88`; the writable run tests FDC sector
+read/write/read-back and appends a blank D88 image, while the read-only run
+checks write protection and byte-for-byte preservation. Do not substitute a
+valuable disk image. The test uses a synthetic one-sector fixture, not a
+physical floppy drive or your own disk media.
+
+2026-09-29: The fixture passed in DOSBox-X at both 3,000 and 12,000 fixed
+cycles with the split PC-8801mkIISR ROM set. Sector read/write/read-back,
+read-only sector protection, D88 append/re-read, malformed-image rejection,
+and clean shutdown after three frames passed. Physical-machine disk behavior
+remains unverified; run the disposable package and report the output.
 
 ### Port validation record
 

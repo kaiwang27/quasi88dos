@@ -45,7 +45,7 @@ executable and its `ROM` directory:
 ```dos
 mount c "D:\QUASI88\build-dos\machine-<printed identifier>"
 c:
-QUASI88 -noconfig -nosaveconfig -v2 -romdir ROM -verbose 1 -dosvga -dosframes 0
+QUASI88 -saveconfig -v2 -romdir ROM -verbose 1 -dosvga -dosframes 0
 ```
 
 `-dosvga` selects BIOS mode 12h and converts the core's 8-bit rendered frame to
@@ -78,14 +78,15 @@ standard VGA BIOS mode 12h and no i740-specific registers. DOSBox-X success does
 not establish compatibility with the user's physical Celeron 600/i740 machine,
 which remains untested.
 
-The DOS configuration file is `QUASI88.INI` in the current directory. To check
-the existing config load/save path in DOSBox-X, run
+The DOS configuration file is `QUASI88.INI` in the current directory. The
+interactive launcher loads it when present and writes current settings on a
+normal exit. Keep a backup if you are testing settings you may want to undo.
+To check the existing config load/save path in DOSBox-X, run
 `.\dos\machtest.ps1 -DosBoxX D:\DOSBox-X\dosbox-x.exe -ConfigTest`. This creates
 a fresh test directory with `-speed 77` in `QUASI88.INI`, verifies the loaded
 value in the executable, enables `-saveconfig`, and verifies the setting was
 written back. The synthetic fixture is used so no user ROMs or settings are
-changed. The interactive `RUN_Q88.BAT` intentionally uses `-noconfig
--nosaveconfig`, so this automated test does not change its behavior.
+changed.
 
 ### Scope and ROM checks
 

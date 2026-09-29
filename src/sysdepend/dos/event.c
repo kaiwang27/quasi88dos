@@ -37,6 +37,22 @@ static void log_key(unsigned int key, unsigned int shift_status)
     }
 }
 unsigned long dos_key_count(void) { return delivered; }
+void dos_mouse_video_update_begin(void)
+{
+    union REGS regs;
+    if (!mouse_available) return;
+    memset(&regs, 0, sizeof(regs));
+    regs.w.ax = 2;
+    int386(0x33, &regs, &regs);
+}
+void dos_mouse_video_update_end(void)
+{
+    union REGS regs;
+    if (!mouse_available) return;
+    memset(&regs, 0, sizeof(regs));
+    regs.w.ax = 1;
+    int386(0x33, &regs, &regs);
+}
 static void release_key(void)
 {
     if (pressed) quasi88_key(pressed, FALSE);

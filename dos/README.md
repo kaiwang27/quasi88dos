@@ -97,10 +97,13 @@ interrupts. It busy-polls the hardware timer for sub-frame waits, so it uses
 the CPU while waiting; DOS has no portable high-resolution sleep path in this
 backend. The VGA backend changes the BIOS mode and restores it on normal exit.
 The QUASI88 toolbar is visible on the reported physical PC. DOS mouse input
-now polls the standard INT 33h driver while VGA is active and forwards absolute
+polls the standard INT 33h driver while VGA is active and forwards absolute
 pointer movement and button transitions through the existing screen/UI event
-path. Driver presence and physical toolbar clicks still need confirmation on
-the user's PC. No interrupt vectors, PIT, DMA, or sound registers are modified.
+path. The user confirmed physical pointer movement and clicks, and reported
+cursor residue while crossing toolbar icons. The VGA backend now hides the
+driver cursor around planar screen updates to avoid stale saved-background
+pixels; this cleanup passes the DOSBox-X VGA readback test and needs physical
+reconfirmation. No interrupt vectors, PIT, DMA, or sound registers are modified.
 D88 image mounting, FDC sector read/write, and image-file writes now have a
 focused DOSBox-X fixture test using the core's FDC port interface. Guest-driven
 disk commands, save states, configuration saving, and snapshots remain
@@ -349,6 +352,14 @@ The user reported no hang during this run. This validates interactive VGA,
 BASIC entry, F1-F5, F11/F12 menus, and the emergency clean-exit path on the
 reported machine. Exact chipset identity and longer-run stability remain
 unverified.
+
+2026-09-29 mouse test: The user reports a working pointer and toolbar clicks on
+the physical PC. `MOUSE.LOG` reports `driver=installed`, hundreds of pointer
+updates, and left-button transitions including toolbar coordinates. A photo
+showed a cursor trail over toolbar graphics. The DOS backend now balances INT
+33h cursor hide/show calls around planar VGA updates and reapplies its planar
+write mode afterward. DOSBox-X plane readback passes with this change; physical
+artifact removal is not yet confirmed.
 
 ## Hello World compiler smoke test
 

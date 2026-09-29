@@ -34,6 +34,14 @@ static void set_mode(int mode)
     r.w.ax = (unsigned short)mode;
     int386(0x10, &r, &r);
 }
+static void set_planar_write_mode(void)
+{
+    outpw(0x3ce, 0x0001); /* Disable set/reset. */
+    outpw(0x3ce, 0x0003); /* No rotate, replace operation. */
+    outpw(0x3ce, 0x0005); /* Write/read mode 0. */
+    outpw(0x3ce, 0xff08); /* All pixel bits writable. */
+    outpw(0x3c4, 0x0f02); /* Enable writes to all planes. */
+}
 static void restore_mode(void)
 {
     if (active) {
@@ -101,10 +109,7 @@ const T_GRAPH_INFO *graph_setup(int width, int height, int fullscreen, double as
             outp(0x3c9, palette[i][1] >> 2);
             outp(0x3c9, palette[i][2] >> 2);
         }
-        outpw(0x3ce, 0x0001); /* Disable set/reset. */
-        outpw(0x3ce, 0x0003); /* No rotate, replace operation. */
-        outpw(0x3ce, 0x0005); /* Write/read mode 0. */
-        outpw(0x3ce, 0xff08); /* All pixel bits writable. */
+        set_planar_write_mode();
     }
     if (active) {
         outpw(0x3c4, 0x0f02);
@@ -162,6 +167,10 @@ void graph_update(int count, T_GRAPH_RECT rect[])
     int p, n, x, y, left, right, top, bottom;
     const unsigned char *src = (const unsigned char *)info.buffer;
     if (!active || !src) return;
+    /* INT 33h uses a saved-background software cursor. Hide it while updating
+     * planar VRAM so it cannot restore stale pixels over the new toolbar. */
+    dos_mouse_video_update_begin();
+    set_planar_write_mode();
     for (p = 0; p < 4; ++p) {
         outpw(0x3c4, ((1 << p) << 8) | 2);
         for (n = 0; n < count; ++n) {
@@ -175,6 +184,7 @@ void graph_update(int count, T_GRAPH_RECT rect[])
         }
     }
     outpw(0x3c4, 0x0f02);
+    dos_mouse_video_update_end();
 }
 int dos_graph_verify(void)
 {
@@ -182,6 +192,7 @@ int dos_graph_verify(void)
     unsigned char expected;
     const unsigned char *src = (const unsigned char *)info.buffer;
     if (!active || !src) return FALSE;
+    dos_mouse_video_update_begin();
     for (p = 0; p < 4; ++p) {
         outpw(0x3ce, (p << 8) | 4);
         for (y = 0; y < info.height; ++y)
@@ -192,6 +203,7 @@ int dos_graph_verify(void)
             }
     }
     outpw(0x3ce, 0x0004);
+    dos_mouse_video_update_end();
     return ok && lit;
 }
 void graph_remove_color(int count, unsigned long pixels[]) { (void)count; (void)pixels; }

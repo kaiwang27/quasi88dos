@@ -100,15 +100,15 @@ backend. The VGA backend changes the BIOS mode and restores it on normal exit.
 The QUASI88 toolbar is visible on the reported physical PC. DOS mouse input
 polls the standard INT 33h driver while VGA is active and forwards absolute
 pointer movement and button transitions through the existing screen/UI event
-path. The user confirmed physical pointer movement and clicks, and reported
-cursor residue while crossing toolbar icons. The VGA backend now hides the
-driver cursor around planar screen updates to avoid stale saved-background
-pixels; this cleanup passes the DOSBox-X VGA readback test and needs physical
-reconfirmation. No interrupt vectors, PIT, DMA, or sound registers are modified.
-D88 image mounting, FDC sector read/write, and image-file writes now have a
-focused DOSBox-X fixture test using the core's FDC port interface. Guest-driven
-disk commands, save states, configuration saving, and snapshots remain
-unvalidated as machine features. Keep writable user media outside test mounts.
+path. The user confirmed physical pointer movement and toolbar clicks, then
+confirmed the cursor residue is gone after the planar redraw fix. No interrupt
+vectors, PIT, DMA, or sound registers are modified. D88 image mounting, FDC
+sector read/write, and image-file writes have a focused DOSBox-X fixture test
+using the core's FDC port interface. Save-state serialization now has a DOSBox-X
+round-trip test over synthetic CPU markers and the DOS file backend; interactive
+state-menu use on physical hardware remains unverified. Guest-driven disk
+commands, configuration saving, and snapshots remain unvalidated as machine
+features. Keep writable user media outside test mounts.
 
 ### Build and validation record
 
@@ -306,6 +306,28 @@ read-only sector protection, D88 append/re-read, malformed-image rejection,
 and clean shutdown after three frames passed. Physical-machine disk behavior
 remains unverified; run the disposable package and report the output.
 
+### State-file round-trip milestone
+
+Run the synthetic marker save/load check:
+
+```powershell
+.\dos\build.ps1 -Target Machine -WatcomRoot D:\watcom
+.\dos\machtest.ps1 -DosBoxX D:\DOSBox-X\dosbox-x.exe -Cycles 12000 -StateTest
+```
+
+`-StateTest` uses the synthetic CPU ROM fixture and requires its `-doscheck`
+marker test. After three frames, QUASI88 writes `QUASI88.STA`, changes the main
+CPU RAM marker, restores the state through the regular serializer and DOS file
+backend, and checks that both CPU markers match their saved values. The state
+file stays in the fresh ignored test directory. This verifies serialization and
+file I/O in DOSBox-X; it does not yet validate using state save/load from the
+interactive PC-88 menus or on physical DOS hardware.
+
+2026-09-29: Open Watcom machine build succeeded with warning level 4 and
+warnings as errors for DOS-specific sources. The state round-trip passed in
+DOSBox-X at 12,000 fixed cycles; `QUASI88.STA` was 178,407 bytes and both CPU
+markers were restored. Physical state-menu behavior remains untested.
+
 ### Port validation record
 
 2026-09-29: `.\dos\build.ps1 -Target PortTest -WatcomRoot D:\watcom`
@@ -359,8 +381,13 @@ the physical PC. `MOUSE.LOG` reports `driver=installed`, hundreds of pointer
 updates, and left-button transitions including toolbar coordinates. A photo
 showed a cursor trail over toolbar graphics. The DOS backend now balances INT
 33h cursor hide/show calls around planar VGA updates and reapplies its planar
-write mode afterward. DOSBox-X plane readback passes with this change; physical
-artifact removal is not yet confirmed.
+write mode afterward. DOSBox-X plane readback passes with this change. The user
+confirmed that mouse movement and clicks still work and the toolbar residue is
+gone.
+
+2026-09-29 launcher follow-up: The user confirmed `RUN_Q88.BAT` now works on the
+physical PC. It is a two-line DOS batch with CRLF line endings. DOSBox-X also
+accepted the batch syntax and created the keyboard and mouse logs.
 
 ## Hello World compiler smoke test
 

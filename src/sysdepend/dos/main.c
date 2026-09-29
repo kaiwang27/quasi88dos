@@ -19,6 +19,7 @@ static int frame_limit = 3;
 static int check_fixture;
 static int check_video;
 static int check_disk;
+static int check_state;
 static const T_CONFIG_TABLE options[] = {
     {300, "dosframes", X_INT, &frame_limit, 0, 36000, NULL, NULL},
     {301, "doscheck", X_FIX, &check_fixture, TRUE, 0, NULL, NULL},
@@ -27,6 +28,7 @@ static const T_CONFIG_TABLE options[] = {
     {304, "doskeylog", X_FIX, &dos_key_log, TRUE, 0, NULL, NULL},
     {305, "dosdiskchk", X_FIX, &check_disk, TRUE, 0, NULL, NULL},
     {306, "dosmouselog", X_FIX, &dos_mouse_log, TRUE, 0, NULL, NULL},
+    {307, "dosstatechk", X_FIX, &check_state, TRUE, 0, NULL, NULL},
     {0, NULL, X_INV, NULL, 0, 0, NULL, NULL}
 };
 
@@ -40,6 +42,7 @@ static void help(FILE *fp)
           "  -dosmouselog          Log INT 33h availability and state to MOUSE.LOG.\n"
           "  Ctrl+Alt+Q             Emergency quit to DOS.\n"
           "  -dosdiskchk           Test mounted drive 1 (test image is modified).\n"
+          "  -dosstatechk          Save/load emulator state (requires -doscheck).\n"
           "  -doscheck             Check synthetic test-ROM RAM markers.\n", fp);
 }
 
@@ -150,11 +153,13 @@ static int check_main_rom(void)
 int main(int argc, char **argv)
 {
     int frames = 0, status, fixture_ok = TRUE, video_ok = TRUE, disk_ok = TRUE;
+    int state_ok = TRUE;
     unsigned long loops = 0;
     puts("QUASI88 DOS (no sound)");
     if (!config_init(argc, argv, options, help, NULL)) return 1;
     quasi88_atexit(config_exit);
     if (check_video && !dos_vga) { puts("DOS: -dosvideochk requires -dosvga"); config_exit(); return 1; }
+    if (check_state && !check_fixture) { puts("DOS: -dosstatechk requires -doscheck"); config_exit(); return 1; }
     if (!check_main_rom()) { config_exit(); return 1; }
     quasi88_start();
     if (!frame_limit) {
@@ -169,6 +174,17 @@ int main(int argc, char **argv)
     }
     if (check_fixture) {
         fixture_ok = main_ram[0x9000] == 0x5a && sub_romram[0x4000] == 0xa5;
+    }
+    if (check_state) {
+        if (!fixture_ok || !statesave()) {
+            state_ok = FALSE;
+        } else {
+            main_ram[0x9000] = 0;
+            state_ok = stateload() && main_ram[0x9000] == 0x5a &&
+                       sub_romram[0x4000] == 0xa5;
+        }
+        puts(state_ok ? "DOS: state save/load marker restore: PASS"
+                      : "DOS: state save/load marker restore: FAIL");
     }
     if (check_video) video_ok = dos_graph_verify();
     if (check_disk) {
@@ -239,11 +255,12 @@ int main(int argc, char **argv)
     if (check_fixture) printf("DOS: synthetic CPU markers: %s\n", fixture_ok ? "PASS" : "FAIL");
     if (check_video) printf("DOS: VGA plane readback: %s\n", video_ok ? "PASS" : "FAIL");
     if (check_disk) printf("DOS: D88 image check: %s\n", disk_ok ? "PASS" : "FAIL");
+    if (check_state) printf("DOS: state file: %s\n", file_state);
     if (dos_vga) printf("DOS: original video mode restored: %s; keys delivered: %lu\n",
                        dos_graph_restored() ? "PASS" : "FAIL", dos_key_count());
     printf("DOS: completed %d/%d frames; clean shutdown\n", frames, frame_limit);
     return (!frame_limit || frames == frame_limit) && fixture_ok && video_ok &&
-           disk_ok && dos_graph_restored() ? 0 : 1;
+           disk_ok && state_ok && dos_graph_restored() ? 0 : 1;
 }
 
 int stateload_system(void) { return TRUE; }

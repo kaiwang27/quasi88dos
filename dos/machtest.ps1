@@ -5,11 +5,13 @@ param(
     [string]$Mk2srDirectory,
     [ValidateRange(3, 600)] [int]$Frames = 3,
     [switch]$VgaTest,
-    [switch]$DiskTest
+    [switch]$DiskTest,
+    [switch]$StateTest
 )
 $ErrorActionPreference = 'Stop'
 if ($Mk2srDirectory -and -not $RomDirectory) { throw '-Mk2srDirectory requires the base -RomDirectory.' }
 if ($DiskTest -and -not $RomDirectory) { throw '-DiskTest requires real ROMs via -RomDirectory.' }
+if ($StateTest -and $RomDirectory) { throw '-StateTest currently uses the synthetic CPU marker ROMs; omit -RomDirectory.' }
 if (-not $DosBoxX) { $DosBoxX = (Get-Command dosbox-x.exe -ErrorAction Stop).Source }
 $DosBoxX = (Resolve-Path -LiteralPath $DosBoxX).Path
 $repoRoot = Split-Path $PSScriptRoot -Parent
@@ -49,6 +51,7 @@ if ($RomDirectory) {
     # Default scheduling switches CPUs on PIO; these simple fixtures have no
     # PIO handshake, so use the existing interleaved CPU mode for this test.
     $checkOption = '-doscheck -cpu 2'
+    if ($StateTest) { $checkOption += ' -dosstatechk' }
     if ($VgaTest) { $checkOption += ' -dosvga -dosvideochk -dosmouselog' }
 }
 if ($DiskTest) {
@@ -142,6 +145,14 @@ try {
             throw 'DOS mouse driver detection did not produce MOUSE.LOG.'
         }
         Write-Host (($mouseLog -split "`r?`n" | Select-String '^driver=' | Select-Object -First 1).Line)
+    }
+    if ($StateTest) {
+        $statePath = Join-Path $testDir 'QUASI88.STA'
+        if ($output -notmatch 'state save/load marker restore: PASS' -or
+            -not (Test-Path $statePath) -or (Get-Item $statePath).Length -le 32) {
+            throw 'State save/load check failed; inspect MACHINE.OUT and QUASI88.STA.'
+        }
+        Write-Host "PASS: state save/load restored the synthetic CPU markers ($((Get-Item $statePath).Length) bytes)"
     }
     if ($DiskTest) {
         $rw = Get-Content (Join-Path $testDir 'DISKRW.OUT') -Raw

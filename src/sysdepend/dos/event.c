@@ -111,6 +111,7 @@ static void poll_keyboard(void)
     log_key(key, shift_status);
     if ((ascii == 0 || ascii == 17) && scan == 0x10 &&
         (shift_status & 0x0c) == 0x0c) {
+        puts("DOS: Ctrl+Alt+Q received; returning to DOS.");
         quasi88_quit();
         return;
     }

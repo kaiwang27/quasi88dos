@@ -157,6 +157,10 @@ int main(int argc, char **argv)
     if (check_video && !dos_vga) { puts("DOS: -dosvideochk requires -dosvga"); config_exit(); return 1; }
     if (!check_main_rom()) { config_exit(); return 1; }
     quasi88_start();
+    if (!frame_limit) {
+        puts("DOS: interactive session started; Ctrl+Alt+Q exits.");
+        fflush(stdout);
+    }
     while ((!frame_limit || frames < frame_limit) &&
            (!frame_limit || loops++ < (unsigned long)frame_limit * 10000UL)) {
         status = quasi88_loop();

@@ -11,6 +11,7 @@
 #define INLINE static __inline
 /* Memory-only renderer for machine bring-up; no hardware display yet. */
 #define SUPPORT_16BPP
+#define SUPPORT_8BPP
 #define HAVE_INTPTR_T
 #define CLIB_DECL
 

@@ -2,7 +2,9 @@ param(
     [string]$DosBoxX,
     [ValidateRange(100, 1000000)] [int]$Cycles = 3000,
     [string]$RomDirectory,
-    [string]$Mk2srDirectory
+    [string]$Mk2srDirectory,
+    [ValidateRange(3, 600)] [int]$Frames = 3,
+    [switch]$VgaTest
 )
 $ErrorActionPreference = 'Stop'
 if ($Mk2srDirectory -and -not $RomDirectory) { throw '-Mk2srDirectory requires the base -RomDirectory.' }
@@ -33,7 +35,7 @@ if ($RomDirectory) {
         # Model-specific input name exceeds DOS 8.3; only the isolated copy is renamed.
         Copy-Item -LiteralPath (Join-Path $Mk2srDirectory 'mk2sr_n88.rom') -Destination (Join-Path $testDir 'ROM\N88.ROM')
     }
-    $checkOption = ''
+    $checkOption = if ($VgaTest) { '-dosvga -dosvideochk' } else { '' }
 } else {
     # Tiny original programs: write a RAM marker, then loop at address 0005.
     $mainRom = New-Object byte[] 32768
@@ -45,6 +47,7 @@ if ($RomDirectory) {
     # Default scheduling switches CPUs on PIO; these simple fixtures have no
     # PIO handshake, so use the existing interleaved CPU mode for this test.
     $checkOption = '-doscheck -cpu 2'
+    if ($VgaTest) { $checkOption += ' -dosvga -dosvideochk' }
 }
 @"
 @echo off
@@ -52,7 +55,7 @@ QUASI88 -noconfig -nosaveconfig -v2 -romdir EMPTY > MISSING.OUT
 if not errorlevel 1 goto fail
 QUASI88 -noconfig -nosaveconfig -v2 -romdir SHORT > SHORT.OUT
 if not errorlevel 1 goto fail
-QUASI88 -noconfig -nosaveconfig -v2 -romdir ROM -verbose 1 -dosframes 3 $checkOption > MACHINE.OUT
+QUASI88 -noconfig -nosaveconfig -v2 -romdir ROM -verbose 1 -dosframes $Frames $checkOption > MACHINE.OUT
 if errorlevel 1 goto fail
 echo PASS > RESULT.TXT
 goto end
@@ -76,23 +79,30 @@ c:
 call RUN.BAT
 "@ | Set-Content $config -Encoding ASCII
 Write-Host "Machine test directory: $testDir"
+$stopwatch = [Diagnostics.Stopwatch]::StartNew()
 $process = Start-Process -FilePath $DosBoxX -ArgumentList "-conf `"$config`"" -WorkingDirectory $testDir -WindowStyle Hidden -PassThru
 try {
     if (-not $process.WaitForExit(45000)) { throw 'DOSBox-X machine test timed out.' }
+    $stopwatch.Stop()
     if ($process.ExitCode -ne 0) { throw "DOSBox-X exited with code $($process.ExitCode)." }
     $output = Get-Content (Join-Path $testDir 'MACHINE.OUT') -Raw
     Write-Host $output
     $result = (Get-Content (Join-Path $testDir 'RESULT.TXT') -Raw).Trim()
     $missing = Get-Content (Join-Path $testDir 'MISSING.OUT') -Raw
     $short = Get-Content (Join-Path $testDir 'SHORT.OUT') -Raw
-    if ($result -ne 'PASS' -or $output -notmatch 'completed 3/3 frames; clean shutdown' -or
+    if ($result -ne 'PASS' -or $output -notmatch "completed $Frames/$Frames frames; clean shutdown" -or
         $missing -notmatch 'missing required main ROM' -or $short -notmatch 'must be 32768 bytes') {
         throw 'Machine startup/negative tests failed; inspect the output files.'
     }
-    if (-not $RomDirectory -and $output -notmatch 'synthetic CPU markers main=5A sub=A5: PASS') {
+    if (-not $RomDirectory -and $output -notmatch 'synthetic CPU markers: PASS') {
         throw 'Synthetic CPU execution check failed.'
     }
-    Write-Host "PASS: missing/truncated ROM rejection and bounded startup at $Cycles cycles"
+    if ($VgaTest -and ($output -notmatch 'VGA plane readback: PASS' -or
+                       $output -notmatch 'original video mode restored: PASS')) {
+        throw 'VGA memory or mode restoration check failed.'
+    }
+    Write-Host "PASS: missing/truncated ROM rejection and $Frames bounded frames at $Cycles cycles"
+    Write-Host "DOSBox-X total runtime: $([math]::Round($stopwatch.Elapsed.TotalSeconds, 3)) seconds"
 } finally {
     if (-not $process.HasExited) { $process.Kill(); $process.WaitForExit() }
     $process.Dispose()

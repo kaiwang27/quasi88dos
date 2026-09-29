@@ -1,6 +1,6 @@
 param(
     [string]$WatcomRoot = $env:WATCOM,
-    [ValidateSet('Hello', 'PortTest', 'Machine')]
+    [ValidateSet('Hello', 'PortTest', 'WaitTest', 'Machine')]
     [string]$Target = 'Hello'
 )
 
@@ -46,7 +46,7 @@ try {
                 $object = 'Q{0:D3}.OBJ' -f $index++
                 $warningOptions = @()
                 if ($source -like 'src/*depend/dos/*') { $warningOptions = @('-we') }
-                & $compilerPath '-y' '-c' '-bt=dos' '-3r' '-j' '-w4' @warningOptions @includes ('-fo=' + $object) (Join-Path $repoRoot $source)
+                & $compilerPath '-y' '-c' '-bt=dos' '-3r' '-mf' '-j' '-w4' @warningOptions @includes ('-fo=' + $object) (Join-Path $repoRoot $source)
                 if ($LASTEXITCODE -ne 0) { throw "DOS compile failed: $source" }
                 $linkLines += "file $object"
             }
@@ -55,7 +55,7 @@ try {
             if ($LASTEXITCODE -ne 0) { throw 'DOS machine link failed' }
             Write-Host "Built $outputDir\QUASI88.EXE"
         } finally { Pop-Location }
-    } else {
+    } elseif ($Target -eq 'PortTest') {
         $repoRoot = Split-Path $PSScriptRoot -Parent
         $includes = @('src/sysdepend/dos', 'src/osdepend/dos', 'src', 'src/pc88', 'src/osdepend', 'src/tk') |
             ForEach-Object { '-i=' + (Join-Path $repoRoot $_) }
@@ -74,6 +74,18 @@ try {
         & $compilerPath '-y' '-bt=dos' '-l=causeway' '-fe=Q88TEST.EXE' '-fm=Q88TEST.MAP' 'PORTTEST.OBJ' 'FILEOP.OBJ' 'Z80.OBJ'
         if ($LASTEXITCODE -ne 0) { throw 'DOS link failed' }
         Write-Host "Built $outputDir\Q88TEST.EXE"
+    } else {
+        $repoRoot = Split-Path $PSScriptRoot -Parent
+        $waitIncludeDirs = @('src/sysdepend/dos', 'src/osdepend/dos', 'src', 'src/pc88', 'src/screen', 'src/screen/func', 'src/screen/func/macro', 'src/tk', 'src/tk/q8tk', 'src/tk/q8tk/q8tk', 'src/ui', 'src/ui/menu', 'src/mon', 'src/snddrv', 'src/sysdepend', 'src/osdepend')
+        $includes = $waitIncludeDirs |
+            ForEach-Object { '-i=' + (Join-Path $repoRoot $_) }
+        & $compilerPath '-y' '-c' '-bt=dos' '-3r' '-mf' '-w4' '-we' @includes '-fo=WAITTEST.OBJ' (Join-Path $PSScriptRoot 'waittest.c')
+        if ($LASTEXITCODE -ne 0) { throw 'DOS wait test compile failed' }
+        & $compilerPath '-y' '-c' '-bt=dos' '-3r' '-mf' '-w4' '-we' @includes '-fo=WAITDOS.OBJ' (Join-Path $repoRoot 'src/sysdepend/dos/wait.c')
+        if ($LASTEXITCODE -ne 0) { throw 'DOS wait backend compile failed' }
+        & $compilerPath '-y' '-bt=dos' '-l=causeway' '-fe=WAITTEST.EXE' '-fm=WAITTEST.MAP' 'WAITTEST.OBJ' 'WAITDOS.OBJ'
+        if ($LASTEXITCODE -ne 0) { throw 'DOS wait test link failed' }
+        Write-Host "Built $outputDir\WAITTEST.EXE"
     }
 } finally {
     Pop-Location

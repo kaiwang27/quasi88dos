@@ -1,8 +1,9 @@
 # DOS port bring-up
 
-The DOS build now links the full machine into `QUASI88.EXE` for bounded,
-headless startup. `Q88TEST.EXE` separately exercises the Z80 core and file
-backend. The original Hello World test remains available independently.
+The DOS build links the full machine into `QUASI88.EXE`. It now has an optional
+VGA 640x480 16-color display and BIOS-polled keyboard path as well as the
+bounded headless startup checks. `Q88TEST.EXE` separately exercises the Z80
+core and file backend. The original Hello World test remains available.
 
 ## Headless machine startup (milestone 2)
 
@@ -36,21 +37,39 @@ handshake that normally schedules the sub CPU. Real-ROM tests use the core's
 default scheduling. Both paths execute the existing PC-8801 machine code;
 neither substitutes CPU or device implementations.
 
-To run interactively, mount the test directory printed by the script:
+To inspect the VGA path interactively, mount a test directory containing the
+executable and its `ROM` directory:
 
 ```dos
 mount c "D:\QUASI88\build-dos\machine-<printed identifier>"
 c:
-QUASI88 -noconfig -nosaveconfig -v2 -romdir ROM -verbose 1 -dosframes 3
+QUASI88 -noconfig -nosaveconfig -v2 -romdir ROM -verbose 1 -dosvga -dosframes 0
 ```
 
-Replace the directory placeholder with the actual path. Expect ROM loading
-diagnostics, `Running QUASI88...`, then
-`DOS: completed 3/3 frames; clean shutdown`. There is **no graphical output**:
-the 16-bit renderer writes to allocated memory, leaving DOS text mode intact.
-`-dosframes` accepts 1 through 600 and defaults to 3. Escape requests an early
-exit, which returns nonzero if the requested frame count was not completed.
-`-doscheck` is exclusively for the generated test fixtures, not real ROMs.
+`-dosvga` selects BIOS mode 12h and converts the core's 8-bit rendered frame to
+the standard 16-color VGA palette, then writes the four planes through VGA
+memory. `-dosframes 0` runs until QUASI88 exits; the default remains three
+frames for repeatable headless tests. BIOS keyboard polling maps ASCII and
+selected special keys into the core and is intended for menu/BASIC interaction.
+F12 maps to the PC-88 system menu, and F11 maps to system status. Input uses
+the enhanced BIOS keyboard services (INT 16h AH=10h/11h/12h) so F11/F12 are
+available on an enhanced AT keyboard. Both common scan-code forms for those
+keys are accepted. Input is
+polled once per emulated frame, so simultaneous-key gaming input is not yet
+supported. Normal exit restores the prior BIOS video mode. Avoid Ctrl-C or
+forced process termination if you want the display mode restored.
+
+For physical keyboard diagnosis, run `RUN_Q88.BAT` with `-doskeylog` enabled.
+It records each BIOS key returned by the keyboard poll in `KEYS.LOG` as
+`scan=XX ascii=XX shift=XXXX`. Ctrl+Alt+Q requests an emergency normal shutdown to DOS;
+this escape path still needs confirmation on physical DOS.
+
+`-dosvideochk` checks rendered VGA planes before exit and requires `-dosvga`.
+The `-VgaTest` test-script switch runs that check with synthetic or copied real
+ROMs. `-doscheck` remains exclusively for generated fixtures. The backend uses
+standard VGA BIOS mode 12h and no i740-specific registers. DOSBox-X success does
+not establish compatibility with the user's physical Celeron 600/i740 machine,
+which remains untested.
 
 ### Scope and ROM checks
 
@@ -68,10 +87,14 @@ can be filled with `FF`, and the built-in font can substitute for `FONT.ROM`.
 Passing startup therefore does not prove ROM completeness or a working BASIC
 prompt. Use `-verbose 1` to see each ROM loading result.
 
-No hardware display, PC-88 keyboard mapping, mouse, joystick, audio output, or
-real-time frame pacing exists yet. The wait backend deliberately runs without
-throttling; Watcom `clock()` is used only for elapsed-time bookkeeping. No
-interrupt vectors, PIT, DMA, sound registers, or video modes are modified.
+Mouse, joystick, and audio output are not implemented. Frame pacing reads the
+BIOS tick and PIT channel 0 counter without reprogramming the timer or hooking
+interrupts. It busy-polls the hardware timer for sub-frame waits, so it uses
+the CPU while waiting; DOS has no portable high-resolution sleep path in this
+backend. The VGA backend changes the BIOS mode and restores it on normal exit.
+The QUASI88 toolbar is visible on the reported physical PC; mouse input is
+still stubbed, so its on-screen controls cannot yet be clicked through this
+backend. No interrupt vectors, PIT, DMA, or sound registers are modified.
 Disk I/O, save states, configuration saving, and snapshots have not been
 validated as machine features. Keep writable user media outside test mounts.
 
@@ -116,14 +139,27 @@ with a clean shutdown. The earlier missing-ROM observations above describe only
 the base-directory test; the overlay resolves those missing files. The original
 ROM directories were not modified.
 
+### VGA display and BIOS keyboard milestone
+
+2026-09-29: `dos/build.ps1 -Target Machine -WatcomRoot D:\watcom` rebuilt the
+full machine with the flat CauseWay memory model required for VGA memory at
+physical `A0000h`; new DOS sources compiled with warnings treated as errors.
+`dos/machtest.ps1 -DosBoxX D:\DOSBox-X\dosbox-x.exe -Cycles 3000 -VgaTest`
+passed synthetic plane readback and text-mode restoration. The same test with
+`-RomDirectory D:\88rom -Mk2srDirectory D:\88rom\pc8801mk2sr` passed after all
+ten model ROMs loaded. These bounded tests establish the graphics-memory path
+and normal mode restoration in DOSBox-X; visual quality, usable live input,
+sustained operation, and physical VGA/i740 behavior still need validation.
+
 For hardware testing, copy `QUASI88.EXE`, `LICENSE.TXT` (the repository license),
-and your own ROMs in a `ROM` subdirectory to a writable DOS directory. Run the
-command above without the DOSBox-X mount commands, then immediately run
-`IF ERRORLEVEL 1 ECHO FAIL`. A 386-or-newer CPU is required; tested emulated RAM
-is 16 MB, not an established minimum. Report CPU, RAM, DOS version, memory
-managers, ROM filenames/sizes, and the complete console output. No hardware
-result has been reported. Next milestone: a visible DOS display backend and
-keyboard input, selected with hardware requirements in mind.
+`VGA_TEST.BAT`, `RUN_Q88.BAT`, and your own ROMs in a `ROM` subdirectory to a
+writable DOS directory. Run `VGA_TEST` for bounded video/readback and clean
+return checks, then `RUN_Q88` for interactive use. Both pause after QUASI88
+returns so the result remains visible. A 386-or-newer CPU is required; tested
+emulated RAM is 16 MB, not an established minimum. Report CPU, RAM, DOS version,
+memory managers, ROM filenames/sizes, and the complete console output. No
+hardware result has been reported. The VGA display path is available with
+`-dosvga`; its physical VGA/i740 performance remains unverified.
 
 ## Build and test the initial port
 
@@ -200,6 +236,26 @@ Desktop CMake/SDL2 sources and all existing core files remain unchanged.
 Full-machine linking and bounded ROM startup are now covered by milestone 2
 above. Graphics and sound hardware requirements remain open.
 
+### BIOS/PIT frame pacing
+
+`wait_vsync_update()` now schedules each frame against the BIOS 18.2 Hz tick
+interpolated with a read-only latch of PIT channel 0. This provides sub-millisecond
+timer counts without CPU-speed delay loops, changing the PIT rate, or installing
+an interrupt handler. The DOS `-sleep` preference cannot yield during the final
+high-resolution wait; this backend polls the timer instead.
+
+Build and run the focused 60-frame timer test at two DOSBox-X cycle settings:
+
+```powershell
+.\dos\build.ps1 -Target WaitTest -WatcomRoot D:\watcom
+.\dos\waittest.ps1 -DosBoxX D:\DOSBox-X\dosbox-x.exe -Cycles 3000
+.\dos\waittest.ps1 -DosBoxX D:\DOSBox-X\dosbox-x.exe -Cycles 12000
+```
+
+Both runs reported 1,083 ms for 60 periods of 18,050 microseconds. This
+validates the timer math in DOSBox-X at those settings, not frame-rate
+performance of the full emulator on physical hardware.
+
 ### Port validation record
 
 2026-09-29: `.\dos\build.ps1 -Target PortTest -WatcomRoot D:\watcom`
@@ -227,7 +283,26 @@ to `LICENSE.TXT` to an otherwise empty writable directory on a 386-or-newer DOS
 PC, run `Q88TEST`, then `IF ERRORLEVEL 1 ECHO FAIL`. Expect the same PASS lines
 and prompt return. Report CPU, available conventional/extended RAM, DOS version,
 memory managers, and all output. Actual RAM/DOS minima remain unverified.
-No physical-hardware result has been reported.
+2026-09-29: The user reports on a physical Celeron 600 PC with a possible
+integrated i740: VGA output and the QUASI88 toolbar were visible, BASIC started
+and ran, and F1-F5 worked.
+F11/F12 did not work. After further key testing the display remained visible
+but the machine stopped responding; it was power-cycled. Ctrl+Alt+Del recovery
+was not tried. The first diagnostic log contained no F11/F12 scan codes, and
+Ctrl+Alt+Q appeared as `scan=10 ascii=00` but did not exit. The prior build used
+legacy BIOS keyboard services, which do not expose enhanced keys on some
+BIOSes. The backend now uses enhanced BIOS keyboard services and logs modifier
+status so these keys can be checked again. This updated path compiled and
+passed the DOSBox-X VGA startup test, but is not yet verified on the physical
+PC.
+
+2026-09-29 follow-up: After changing to enhanced BIOS keyboard services, the
+user reports F11, F12, and Ctrl+Alt+Q all worked on the physical PC. The new
+log records F11 as scan `85` and F12 as scan `86`; Ctrl+Alt+Q returned to DOS.
+The user reported no hang during this run. This validates interactive VGA,
+BASIC entry, F1-F5, F11/F12 menus, and the emergency clean-exit path on the
+reported machine. Exact chipset identity and longer-run stability remain
+unverified.
 
 ## Hello World compiler smoke test
 

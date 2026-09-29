@@ -1,9 +1,9 @@
 # DOS port bring-up
 
-The DOS build links the full machine into `QUASI88.EXE`. It now has an optional
-VGA 640x480 16-color display and BIOS-polled keyboard path as well as the
-bounded headless startup checks. `Q88TEST.EXE` separately exercises the Z80
-core and file backend. The original Hello World test remains available.
+The DOS build links the full machine into `QUASI88.EXE`. It has an optional VGA
+640x480 16-color display, BIOS-polled keyboard, and DOS mouse-driver path, as
+well as bounded headless startup checks. `Q88TEST.EXE` separately exercises
+the Z80 core and file backend. The original Hello World test remains available.
 
 ## Headless machine startup (milestone 2)
 
@@ -59,10 +59,13 @@ polled once per emulated frame, so simultaneous-key gaming input is not yet
 supported. Normal exit restores the prior BIOS video mode. Avoid Ctrl-C or
 forced process termination if you want the display mode restored.
 
-For physical keyboard diagnosis, run `RUN_Q88.BAT` with `-doskeylog` enabled.
-It records each BIOS key returned by the keyboard poll in `KEYS.LOG` as
-`scan=XX ascii=XX shift=XXXX`. Ctrl+Alt+Q requests an emergency normal shutdown to DOS;
-this escape path still needs confirmation on physical DOS.
+For physical keyboard and mouse diagnosis, run `RUN_Q88.BAT`. It records BIOS
+keyboard events in `KEYS.LOG` and DOS mouse-driver availability, pointer
+coordinates, and button changes in `MOUSE.LOG`. The mouse path polls the
+installed INT 33h driver while VGA is active; without a driver, keyboard
+operation continues normally. Left, right, and middle buttons map to QUASI88's
+existing mouse events, including toolbar clicks. Ctrl+Alt+Q requests an
+emergency normal shutdown to DOS.
 
 `-dosvideochk` checks rendered VGA planes before exit and requires `-dosvga`.
 The `-VgaTest` test-script switch runs that check with synthetic or copied real
@@ -87,14 +90,17 @@ can be filled with `FF`, and the built-in font can substitute for `FONT.ROM`.
 Passing startup therefore does not prove ROM completeness or a working BASIC
 prompt. Use `-verbose 1` to see each ROM loading result.
 
-Mouse, joystick, and audio output are not implemented. Frame pacing reads the
+Joystick and audio output are not implemented. Mouse input requires an installed
+DOS INT 33h driver and is polled once per emulated frame. Frame pacing reads the
 BIOS tick and PIT channel 0 counter without reprogramming the timer or hooking
 interrupts. It busy-polls the hardware timer for sub-frame waits, so it uses
 the CPU while waiting; DOS has no portable high-resolution sleep path in this
 backend. The VGA backend changes the BIOS mode and restores it on normal exit.
-The QUASI88 toolbar is visible on the reported physical PC; mouse input is
-still stubbed, so its on-screen controls cannot yet be clicked through this
-backend. No interrupt vectors, PIT, DMA, or sound registers are modified.
+The QUASI88 toolbar is visible on the reported physical PC. DOS mouse input
+now polls the standard INT 33h driver while VGA is active and forwards absolute
+pointer movement and button transitions through the existing screen/UI event
+path. Driver presence and physical toolbar clicks still need confirmation on
+the user's PC. No interrupt vectors, PIT, DMA, or sound registers are modified.
 D88 image mounting, FDC sector read/write, and image-file writes now have a
 focused DOSBox-X fixture test using the core's FDC port interface. Guest-driven
 disk commands, save states, configuration saving, and snapshots remain
@@ -152,6 +158,8 @@ passed synthetic plane readback and text-mode restoration. The same test with
 ten model ROMs loaded. These bounded tests establish the graphics-memory path
 and normal mode restoration in DOSBox-X; visual quality, usable live input,
 sustained operation, and physical VGA/i740 behavior still need validation.
+The synthetic VGA smoke test also found DOSBox-X's INT 33h mouse driver through
+the `-dosmouselog` diagnostic. It did not automate pointer movement or clicks.
 
 For hardware testing, copy `QUASI88.EXE`, `LICENSE.TXT` (the repository license),
 `VGA_TEST.BAT`, `RUN_Q88.BAT`, and your own ROMs in a `ROM` subdirectory to a

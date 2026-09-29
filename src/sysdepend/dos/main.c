@@ -14,6 +14,7 @@
 
 int dos_vga;
 int dos_key_log;
+int dos_mouse_log;
 static int frame_limit = 3;
 static int check_fixture;
 static int check_video;
@@ -25,6 +26,7 @@ static const T_CONFIG_TABLE options[] = {
     {303, "dosvideochk", X_FIX, &check_video, TRUE, 0, NULL, NULL},
     {304, "doskeylog", X_FIX, &dos_key_log, TRUE, 0, NULL, NULL},
     {305, "dosdiskchk", X_FIX, &check_disk, TRUE, 0, NULL, NULL},
+    {306, "dosmouselog", X_FIX, &dos_mouse_log, TRUE, 0, NULL, NULL},
     {0, NULL, X_INV, NULL, 0, 0, NULL, NULL}
 };
 
@@ -35,6 +37,7 @@ static void help(FILE *fp)
           "  -dosvga               VGA 640x480, 16-color approximated palette.\n"
           "  -dosvideochk          Verify VGA planes before restoring text mode.\n"
           "  -doskeylog            Log BIOS keyboard scan/ASCII codes to KEYS.LOG.\n"
+          "  -dosmouselog          Log INT 33h availability and state to MOUSE.LOG.\n"
           "  Ctrl+Alt+Q             Emergency quit to DOS.\n"
           "  -dosdiskchk           Test mounted drive 1 (test image is modified).\n"
           "  -doscheck             Check synthetic test-ROM RAM markers.\n", fp);

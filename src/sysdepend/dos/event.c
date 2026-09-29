@@ -2,6 +2,7 @@
  * released: BASIC typing only, not independent held keys/game controls.
  */
 #include <bios.h>
+#include <i86.h>
 #include <stdio.h>
 #include <string.h>
 #include "quasi88.h"
@@ -9,6 +10,20 @@
 #include "keyboard.h"
 #include "device.h"
 static int pressed, shift, control, remaining;
+static int mouse_available;
+static unsigned int mouse_buttons;
+static int mouse_x = 320, mouse_y = 240;
+static int last_mouse_x = 320, last_mouse_y = 240;
+static void log_mouse_state(void)
+{
+    FILE *fp;
+    if (!dos_mouse_log) return;
+    fp = fopen("MOUSE.LOG", "a");
+    if (fp) {
+        fprintf(fp, "x=%d y=%d buttons=%u\n", mouse_x, mouse_y, mouse_buttons);
+        fclose(fp);
+    }
+}
 static unsigned long delivered;
 static void log_key(unsigned int key, unsigned int shift_status)
 {
@@ -29,19 +44,57 @@ static void release_key(void)
     if (control) quasi88_key(KEY88_CTRL, FALSE);
     pressed = shift = control = 0;
 }
+static void release_mouse(void)
+{
+    static const int codes[3] = {KEY88_MOUSE_L, KEY88_MOUSE_R, KEY88_MOUSE_M};
+    int i;
+    for (i = 0; i < 3; ++i) {
+        if (mouse_buttons & (1U << i)) quasi88_mouse(codes[i], FALSE);
+    }
+    mouse_buttons = 0;
+}
 void event_init(void)
 {
     FILE *fp;
     pressed = shift = control = remaining = 0;
+    mouse_available = FALSE;
+    mouse_buttons = 0;
+    mouse_x = 320;
+    mouse_y = 240;
+    last_mouse_x = 320;
+    last_mouse_y = 240;
+    if (dos_mouse_log && (fp = fopen("MOUSE.LOG", "w")) != NULL) {
+        fputs("DOS INT 33h mouse log\n", fp);
+        fclose(fp);
+    }
+    if (dos_vga) {
+        union REGS regs;
+        memset(&regs, 0, sizeof(regs));
+        regs.w.ax = 0;
+        int386(0x33, &regs, &regs);
+        if (regs.w.ax == 0xffff) {
+            mouse_available = TRUE;
+            memset(&regs, 0, sizeof(regs));
+            regs.w.ax = 1;
+            int386(0x33, &regs, &regs);
+        }
+    }
+    if (dos_mouse_log) {
+        fp = fopen("MOUSE.LOG", "a");
+        if (fp) {
+            fprintf(fp, "driver=%s\n", mouse_available ? "installed" : "not-installed");
+            fclose(fp);
+        }
+    }
     delivered = 0;
     if (dos_key_log && (fp = fopen("KEYS.LOG", "w")) != NULL) {
         fputs("DOS BIOS keyboard scan log\n", fp);
         fclose(fp);
     }
 }
-void event_exit(void) { release_key(); }
-void event_switch(void) { release_key(); remaining = 0; }
-void event_update(void)
+void event_exit(void) { release_key(); release_mouse(); }
+void event_switch(void) { release_key(); release_mouse(); remaining = 0; }
+static void poll_keyboard(void)
 {
     unsigned int key, shift_status;
     int ascii, scan, code = 0;
@@ -99,7 +152,41 @@ void event_update(void)
         ++delivered;
     }
 }
-void event_get_mouse_pos(int *x, int *y) { *x = 0; *y = 0; }
+static void poll_mouse(void)
+{
+    union REGS regs;
+    unsigned int buttons;
+    static const int codes[3] = {KEY88_MOUSE_L, KEY88_MOUSE_R, KEY88_MOUSE_M};
+    int i, changed;
+    if (!mouse_available) return;
+    memset(&regs, 0, sizeof(regs));
+    regs.w.ax = 3;
+    int386(0x33, &regs, &regs);
+    mouse_x = regs.w.cx;
+    mouse_y = regs.w.dx;
+    buttons = regs.w.bx & 7;
+    changed = mouse_x != last_mouse_x || mouse_y != last_mouse_y || buttons != mouse_buttons;
+    last_mouse_x = mouse_x;
+    last_mouse_y = mouse_y;
+    quasi88_mouse_moved_abs(mouse_x, mouse_y);
+    for (i = 0; i < 3; ++i) {
+        if (((buttons ^ mouse_buttons) & (1U << i)) != 0) {
+            quasi88_mouse(codes[i], (buttons & (1U << i)) != 0);
+        }
+    }
+    mouse_buttons = buttons;
+    if (changed) log_mouse_state();
+}
+void event_update(void)
+{
+    poll_keyboard();
+    poll_mouse();
+}
+void event_get_mouse_pos(int *x, int *y)
+{
+    *x = mouse_x;
+    *y = mouse_y;
+}
 int event_keylayout_change(void) { return FALSE; }
 void event_keylayout_revert(void) {}
 int event_get_joystick_num(void) { return 0; }

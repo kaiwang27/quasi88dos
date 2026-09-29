@@ -37,7 +37,7 @@ if ($RomDirectory) {
         # Model-specific input name exceeds DOS 8.3; only the isolated copy is renamed.
         Copy-Item -LiteralPath (Join-Path $Mk2srDirectory 'mk2sr_n88.rom') -Destination (Join-Path $testDir 'ROM\N88.ROM')
     }
-    $checkOption = if ($VgaTest) { '-dosvga -dosvideochk' } else { '' }
+    $checkOption = if ($VgaTest) { '-dosvga -dosvideochk -dosmouselog' } else { '' }
 } else {
     # Tiny original programs: write a RAM marker, then loop at address 0005.
     $mainRom = New-Object byte[] 32768
@@ -49,7 +49,7 @@ if ($RomDirectory) {
     # Default scheduling switches CPUs on PIO; these simple fixtures have no
     # PIO handshake, so use the existing interleaved CPU mode for this test.
     $checkOption = '-doscheck -cpu 2'
-    if ($VgaTest) { $checkOption += ' -dosvga -dosvideochk' }
+    if ($VgaTest) { $checkOption += ' -dosvga -dosvideochk -dosmouselog' }
 }
 if ($DiskTest) {
     # One-image D88 with a single 256-byte sector (0..255) for FDC tests.
@@ -135,6 +135,13 @@ try {
     if ($VgaTest -and ($output -notmatch 'VGA plane readback: PASS' -or
                        $output -notmatch 'original video mode restored: PASS')) {
         throw 'VGA memory or mode restoration check failed.'
+    }
+    if ($VgaTest) {
+        $mouseLog = Get-Content (Join-Path $testDir 'MOUSE.LOG') -Raw
+        if ($mouseLog -notmatch 'driver=(installed|not-installed)') {
+            throw 'DOS mouse driver detection did not produce MOUSE.LOG.'
+        }
+        Write-Host (($mouseLog -split "`r?`n" | Select-String '^driver=' | Select-Object -First 1).Line)
     }
     if ($DiskTest) {
         $rw = Get-Content (Join-Path $testDir 'DISKRW.OUT') -Raw

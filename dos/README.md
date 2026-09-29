@@ -452,6 +452,14 @@ accepted the batch syntax and created the keyboard and mouse logs.
 existing PC-88 function-key codes. This compiles with Open Watcom; physical
 behavior remains for the next hardware test.
 
+2026-09-29 physical feature pass: The user reports all planned checks worked
+except the joystick test, since no joystick is available. The DOS PC ran BASIC,
+keyboard shortcuts and menus, mouse/toolbar input, normal exit, INI persistence,
+and BMP snapshots. The desktop `QUASI88.INI` is 3,950 bytes and includes
+`-saveconfig`; `SAVE0000.BMP` and `SAVE0001.BMP` are both valid 640x400 24-bit
+BMPs of 768,054 bytes. The first image visibly captures the BASIC screen. The
+PC game-port button path remains untested on hardware.
+
 ## Hello World compiler smoke test
 
 From the repository root in PowerShell:

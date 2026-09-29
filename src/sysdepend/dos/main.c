@@ -47,7 +47,7 @@ static void help(FILE *fp)
           "  -dosvideochk          Verify VGA planes before restoring text mode.\n"
           "  -doskeylog            Log BIOS keyboard scan/ASCII codes to KEYS.LOG.\n"
           "  -dosmouselog          Log INT 33h availability and state to MOUSE.LOG.\n"
-          "  Ctrl+Alt+Q             Emergency quit to DOS.\n"
+          "  Ctrl+Q / Ctrl+Alt+Q    Emergency quit to DOS.\n"
           "  -dosdiskchk           Test mounted drive 1 (test image is modified).\n"
           "  -dosstatechk          Save/load emulator state (requires -doscheck).\n"
           "  -dossnapchk           Save/check a BMP screenshot (requires -doscheck).\n"

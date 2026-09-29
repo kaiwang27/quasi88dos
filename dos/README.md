@@ -68,7 +68,8 @@ availability, pointer coordinates, and button changes in `MOUSE.LOG`. The mouse 
 installed INT 33h driver while VGA is active; without a driver, keyboard
 operation continues normally. Left, right, and middle buttons map to QUASI88's
 existing mouse events, including toolbar clicks. Ctrl+Alt+Q requests an
-emergency normal shutdown to DOS.
+emergency normal shutdown to DOS. Ctrl+Q is also accepted as a fallback for
+BIOSes that do not report the Alt modifier consistently.
 
 `-dosvideochk` checks rendered VGA planes before exit and requires `-dosvga`.
 The `-VgaTest` test-script switch runs that check with synthetic or copied real

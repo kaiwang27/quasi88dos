@@ -125,9 +125,11 @@ static void poll_keyboard(void)
     ascii = key & 255;
     scan = key >> 8;
     log_key(key, shift_status);
-    if ((ascii == 0 || ascii == 17) && scan == 0x10 &&
-        (shift_status & 0x0c) == 0x0c) {
-        puts("DOS: Ctrl+Alt+Q received; returning to DOS.");
+    if (scan == 0x10 &&
+        (ascii == 17 || (ascii == 0 && (shift_status & 0x0c) == 0x0c))) {
+        puts((shift_status & 0x08) ?
+             "DOS: Ctrl+Alt+Q received; returning to DOS." :
+             "DOS: Ctrl+Q received; returning to DOS.");
         quasi88_quit();
         return;
     }

@@ -5,6 +5,7 @@
 #include "file-op.h"
 #include "event.h"
 #include "pc88main.h"
+#include "intr.h"
 #include "drive.h"
 #include "fdc.h"
 #include "image.h"
@@ -23,6 +24,7 @@ static int check_video;
 static int check_disk;
 static int check_state;
 static int check_snapshot;
+static int check_config;
 static const T_CONFIG_TABLE options[] = {
     {300, "dosframes", X_INT, &frame_limit, 0, 36000, NULL, NULL},
     {301, "doscheck", X_FIX, &check_fixture, TRUE, 0, NULL, NULL},
@@ -33,6 +35,7 @@ static const T_CONFIG_TABLE options[] = {
     {306, "dosmouselog", X_FIX, &dos_mouse_log, TRUE, 0, NULL, NULL},
     {307, "dosstatechk", X_FIX, &check_state, TRUE, 0, NULL, NULL},
     {308, "dossnapchk", X_FIX, &check_snapshot, TRUE, 0, NULL, NULL},
+    {309, "doscfgchk", X_FIX, &check_config, TRUE, 0, NULL, NULL},
     {0, NULL, X_INV, NULL, 0, 0, NULL, NULL}
 };
 
@@ -48,6 +51,7 @@ static void help(FILE *fp)
           "  -dosdiskchk           Test mounted drive 1 (test image is modified).\n"
           "  -dosstatechk          Save/load emulator state (requires -doscheck).\n"
           "  -dossnapchk           Save/check a BMP screenshot (requires -doscheck).\n"
+          "  -doscfgchk            Check loaded DOS config speed (fixture uses 77).\n"
           "  -doscheck             Check synthetic test-ROM RAM markers.\n", fp);
 }
 
@@ -158,7 +162,7 @@ static int check_main_rom(void)
 int main(int argc, char **argv)
 {
     int frames = 0, status, fixture_ok = TRUE, video_ok = TRUE, disk_ok = TRUE;
-    int state_ok = TRUE, snapshot_ok = TRUE;
+    int state_ok = TRUE, snapshot_ok = TRUE, config_ok = TRUE;
     unsigned long loops = 0;
     puts("QUASI88 DOS (no sound)");
     if (!config_init(argc, argv, options, help, NULL)) return 1;
@@ -166,6 +170,7 @@ int main(int argc, char **argv)
     if (check_video && !dos_vga) { puts("DOS: -dosvideochk requires -dosvga"); config_exit(); return 1; }
     if (check_state && !check_fixture) { puts("DOS: -dosstatechk requires -doscheck"); config_exit(); return 1; }
     if (check_snapshot && !check_fixture) { puts("DOS: -dossnapchk requires -doscheck"); config_exit(); return 1; }
+    if (check_config && !check_fixture) { puts("DOS: -doscfgchk requires -doscheck"); config_exit(); return 1; }
     if (!check_main_rom()) { config_exit(); return 1; }
     quasi88_start();
     if (!frame_limit) {
@@ -211,6 +216,11 @@ int main(int argc, char **argv)
         puts(snapshot_ok ? "DOS: BMP snapshot output: PASS"
                          : "DOS: BMP snapshot output: FAIL");
         if (snapshot_ok) printf("DOS: snapshot file: %s\n", path);
+    }
+    if (check_config) {
+        config_ok = wait_rate == 77;
+        printf("DOS: configuration load speed=%d: %s\n",
+               wait_rate, config_ok ? "PASS" : "FAIL");
     }
     if (check_video) video_ok = dos_graph_verify();
     if (check_disk) {
@@ -286,7 +296,8 @@ int main(int argc, char **argv)
                        dos_graph_restored() ? "PASS" : "FAIL", dos_key_count());
     printf("DOS: completed %d/%d frames; clean shutdown\n", frames, frame_limit);
     return (!frame_limit || frames == frame_limit) && fixture_ok && video_ok &&
-           disk_ok && state_ok && snapshot_ok && dos_graph_restored() ? 0 : 1;
+           disk_ok && state_ok && snapshot_ok && config_ok &&
+           dos_graph_restored() ? 0 : 1;
 }
 
 int stateload_system(void) { return TRUE; }

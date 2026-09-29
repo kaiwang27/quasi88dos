@@ -7,13 +7,15 @@ param(
     [switch]$VgaTest,
     [switch]$DiskTest,
     [switch]$StateTest,
-    [switch]$SnapshotTest
+    [switch]$SnapshotTest,
+    [switch]$ConfigTest
 )
 $ErrorActionPreference = 'Stop'
 if ($Mk2srDirectory -and -not $RomDirectory) { throw '-Mk2srDirectory requires the base -RomDirectory.' }
 if ($DiskTest -and -not $RomDirectory) { throw '-DiskTest requires real ROMs via -RomDirectory.' }
 if ($StateTest -and $RomDirectory) { throw '-StateTest currently uses the synthetic CPU marker ROMs; omit -RomDirectory.' }
 if ($SnapshotTest -and $RomDirectory) { throw '-SnapshotTest currently uses the synthetic CPU marker ROMs; omit -RomDirectory.' }
+if ($ConfigTest -and $RomDirectory) { throw '-ConfigTest currently uses the synthetic CPU marker ROMs; omit -RomDirectory.' }
 if (-not $DosBoxX) { $DosBoxX = (Get-Command dosbox-x.exe -ErrorAction Stop).Source }
 $DosBoxX = (Resolve-Path -LiteralPath $DosBoxX).Path
 $repoRoot = Split-Path $PSScriptRoot -Parent
@@ -22,12 +24,16 @@ $binary = Join-Path $buildDir 'QUASI88.EXE'
 if (-not (Test-Path $binary)) { throw 'Build -Target Machine first.' }
 $testDir = Join-Path $buildDir ('machine-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $testDir | Out-Null
+if ($ConfigTest) {
+    [IO.File]::WriteAllText((Join-Path $testDir 'QUASI88.INI'), "-speed 77`r`n", [Text.Encoding]::ASCII)
+}
 Copy-Item -LiteralPath $binary -Destination $testDir
 Copy-Item -LiteralPath (Join-Path $repoRoot 'LICENSE') -Destination (Join-Path $testDir 'LICENSE.TXT')
 foreach ($name in @('ROM', 'EMPTY', 'SHORT')) {
     New-Item -ItemType Directory -Path (Join-Path $testDir $name) | Out-Null
 }
 [IO.File]::WriteAllBytes((Join-Path $testDir 'SHORT\N88.ROM'), [byte[]]@(0))
+$configSaveOption = ''
 if ($RomDirectory) {
     $RomDirectory = (Resolve-Path -LiteralPath $RomDirectory).Path
     # Copy only ROM files. Originals and all disk images remain outside the mount.
@@ -56,6 +62,10 @@ if ($RomDirectory) {
     if ($VgaTest) { $checkOption += ' -dosvga -dosvideochk -dosmouselog' }
     if ($StateTest) { $checkOption += ' -dosstatechk' }
     if ($SnapshotTest) { $checkOption += ' -dossnapchk' }
+    if ($ConfigTest) {
+        $checkOption += ' -doscfgchk'
+        $configSaveOption = '-saveconfig'
+    }
 }
 if ($DiskTest) {
     # One-image D88 with a single 256-byte sector (0..255) for FDC tests.
@@ -95,7 +105,7 @@ QUASI88 -romdir EMPTY > MISSING.OUT
 if not errorlevel 1 goto fail
 QUASI88 -romdir SHORT > SHORT.OUT
 if not errorlevel 1 goto fail
-QUASI88 -dosframes $Frames $checkOption > MACHINE.OUT
+QUASI88 -dosframes $Frames $checkOption $configSaveOption > MACHINE.OUT
 if errorlevel 1 goto fail
 $diskTestCommands
 echo PASS > RESULT.TXT
@@ -166,6 +176,15 @@ try {
             throw 'BMP snapshot check failed; inspect MACHINE.OUT and SAVE0000.BMP.'
         }
         Write-Host 'PASS: 640x400 24-bit BMP screenshot written (768054 bytes)'
+    }
+    if ($ConfigTest) {
+        $configPath = Join-Path $testDir 'QUASI88.INI'
+        $savedConfig = Get-Content $configPath -Raw
+        if ($output -notmatch 'configuration load speed=77: PASS' -or
+            $savedConfig -notmatch '(?m)^-speed\s+77\b') {
+            throw 'DOS configuration load/save check failed; inspect MACHINE.OUT and QUASI88.INI.'
+        }
+        Write-Host 'PASS: QUASI88.INI loaded speed 77 and saved the setting back to DOS disk'
     }
     if ($DiskTest) {
         $rw = Get-Content (Join-Path $testDir 'DISKRW.OUT') -Raw

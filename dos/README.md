@@ -77,6 +77,15 @@ standard VGA BIOS mode 12h and no i740-specific registers. DOSBox-X success does
 not establish compatibility with the user's physical Celeron 600/i740 machine,
 which remains untested.
 
+The DOS configuration file is `QUASI88.INI` in the current directory. To check
+the existing config load/save path in DOSBox-X, run
+`.\dos\machtest.ps1 -DosBoxX D:\DOSBox-X\dosbox-x.exe -ConfigTest`. This creates
+a fresh test directory with `-speed 77` in `QUASI88.INI`, verifies the loaded
+value in the executable, enables `-saveconfig`, and verifies the setting was
+written back. The synthetic fixture is used so no user ROMs or settings are
+changed. The interactive `RUN_Q88.BAT` intentionally uses `-noconfig
+-nosaveconfig`, so this automated test does not change its behavior.
+
 ### Scope and ROM checks
 
 The standard machine core, ROM loader, main/sub CPUs, video renderer, disk
@@ -109,8 +118,10 @@ sector read/write, and image-file writes have a focused DOSBox-X fixture test
 using the core's FDC port interface. Save-state serialization now has a DOSBox-X
 round-trip test over synthetic CPU markers and the DOS file backend; interactive
 state-menu use on physical hardware remains unverified. Guest-driven disk
-commands, configuration saving, and interactive screenshot use remain
-unvalidated as machine features. Keep writable user media outside test mounts.
+commands and interactive screenshot use remain unvalidated as machine features.
+Configuration load/save is covered by a synthetic DOSBox-X round-trip test;
+physical hardware behavior remains unverified. Keep writable user media outside
+test mounts.
 
 ### Build and validation record
 

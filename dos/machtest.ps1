@@ -6,12 +6,14 @@ param(
     [ValidateRange(3, 600)] [int]$Frames = 3,
     [switch]$VgaTest,
     [switch]$DiskTest,
-    [switch]$StateTest
+    [switch]$StateTest,
+    [switch]$SnapshotTest
 )
 $ErrorActionPreference = 'Stop'
 if ($Mk2srDirectory -and -not $RomDirectory) { throw '-Mk2srDirectory requires the base -RomDirectory.' }
 if ($DiskTest -and -not $RomDirectory) { throw '-DiskTest requires real ROMs via -RomDirectory.' }
 if ($StateTest -and $RomDirectory) { throw '-StateTest currently uses the synthetic CPU marker ROMs; omit -RomDirectory.' }
+if ($SnapshotTest -and $RomDirectory) { throw '-SnapshotTest currently uses the synthetic CPU marker ROMs; omit -RomDirectory.' }
 if (-not $DosBoxX) { $DosBoxX = (Get-Command dosbox-x.exe -ErrorAction Stop).Source }
 $DosBoxX = (Resolve-Path -LiteralPath $DosBoxX).Path
 $repoRoot = Split-Path $PSScriptRoot -Parent
@@ -52,6 +54,7 @@ if ($RomDirectory) {
     # PIO handshake, so use the existing interleaved CPU mode for this test.
     $checkOption = '-doscheck -cpu 2'
     if ($StateTest) { $checkOption += ' -dosstatechk' }
+    if ($SnapshotTest) { $checkOption += ' -dossnapchk' }
     if ($VgaTest) { $checkOption += ' -dosvga -dosvideochk -dosmouselog' }
 }
 if ($DiskTest) {
@@ -153,6 +156,14 @@ try {
             throw 'State save/load check failed; inspect MACHINE.OUT and QUASI88.STA.'
         }
         Write-Host "PASS: state save/load restored the synthetic CPU markers ($((Get-Item $statePath).Length) bytes)"
+    }
+    if ($SnapshotTest) {
+        $snapshotPath = Join-Path $testDir 'SAVE0000.BMP'
+        if ($output -notmatch 'BMP snapshot output: PASS' -or
+            -not (Test-Path $snapshotPath) -or (Get-Item $snapshotPath).Length -ne 768054) {
+            throw 'BMP snapshot check failed; inspect MACHINE.OUT and SAVE0000.BMP.'
+        }
+        Write-Host 'PASS: 640x400 24-bit BMP screenshot written (768054 bytes)'
     }
     if ($DiskTest) {
         $rw = Get-Content (Join-Path $testDir 'DISKRW.OUT') -Raw

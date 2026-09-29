@@ -3,6 +3,7 @@
 #include "quasi88.h"
 #include "getconf.h"
 #include "file-op.h"
+#include "event.h"
 #include "pc88main.h"
 #include "drive.h"
 #include "fdc.h"
@@ -10,6 +11,7 @@
 #include "memory.h"
 #include "menu.h"
 #include "suspend.h"
+#include "snapshot.h"
 #include "device.h"
 
 int dos_vga;
@@ -20,6 +22,7 @@ static int check_fixture;
 static int check_video;
 static int check_disk;
 static int check_state;
+static int check_snapshot;
 static const T_CONFIG_TABLE options[] = {
     {300, "dosframes", X_INT, &frame_limit, 0, 36000, NULL, NULL},
     {301, "doscheck", X_FIX, &check_fixture, TRUE, 0, NULL, NULL},
@@ -29,6 +32,7 @@ static const T_CONFIG_TABLE options[] = {
     {305, "dosdiskchk", X_FIX, &check_disk, TRUE, 0, NULL, NULL},
     {306, "dosmouselog", X_FIX, &dos_mouse_log, TRUE, 0, NULL, NULL},
     {307, "dosstatechk", X_FIX, &check_state, TRUE, 0, NULL, NULL},
+    {308, "dossnapchk", X_FIX, &check_snapshot, TRUE, 0, NULL, NULL},
     {0, NULL, X_INV, NULL, 0, 0, NULL, NULL}
 };
 
@@ -43,6 +47,7 @@ static void help(FILE *fp)
           "  Ctrl+Alt+Q             Emergency quit to DOS.\n"
           "  -dosdiskchk           Test mounted drive 1 (test image is modified).\n"
           "  -dosstatechk          Save/load emulator state (requires -doscheck).\n"
+          "  -dossnapchk           Save/check a BMP screenshot (requires -doscheck).\n"
           "  -doscheck             Check synthetic test-ROM RAM markers.\n", fp);
 }
 
@@ -153,13 +158,14 @@ static int check_main_rom(void)
 int main(int argc, char **argv)
 {
     int frames = 0, status, fixture_ok = TRUE, video_ok = TRUE, disk_ok = TRUE;
-    int state_ok = TRUE;
+    int state_ok = TRUE, snapshot_ok = TRUE;
     unsigned long loops = 0;
     puts("QUASI88 DOS (no sound)");
     if (!config_init(argc, argv, options, help, NULL)) return 1;
     quasi88_atexit(config_exit);
     if (check_video && !dos_vga) { puts("DOS: -dosvideochk requires -dosvga"); config_exit(); return 1; }
     if (check_state && !check_fixture) { puts("DOS: -dosstatechk requires -doscheck"); config_exit(); return 1; }
+    if (check_snapshot && !check_fixture) { puts("DOS: -dossnapchk requires -doscheck"); config_exit(); return 1; }
     if (!check_main_rom()) { config_exit(); return 1; }
     quasi88_start();
     if (!frame_limit) {
@@ -185,6 +191,26 @@ int main(int argc, char **argv)
         }
         puts(state_ok ? "DOS: state save/load marker restore: PASS"
                       : "DOS: state save/load marker restore: FAIL");
+    }
+    if (check_snapshot) {
+        char path[QUASI88_MAX_FILENAME + 16];
+        unsigned char header[54];
+        FILE *fp;
+        sprintf(path, "%s0000.BMP", filename_get_snap_base());
+        snapshot_ok = fixture_ok && quasi88_screen_snapshot();
+        fp = snapshot_ok ? fopen(path, "rb") : NULL;
+        if (!fp || fread(header, 1, sizeof(header), fp) != sizeof(header)) {
+            snapshot_ok = FALSE;
+        } else if (header[0] != 'B' || header[1] != 'M' ||
+                   header[18] != 0x80 || header[19] != 0x02 ||
+                   header[22] != 0x90 || header[23] != 0x01 ||
+                   fseek(fp, 0, SEEK_END) != 0 || ftell(fp) != 768054L) {
+            snapshot_ok = FALSE;
+        }
+        if (fp) fclose(fp);
+        puts(snapshot_ok ? "DOS: BMP snapshot output: PASS"
+                         : "DOS: BMP snapshot output: FAIL");
+        if (snapshot_ok) printf("DOS: snapshot file: %s\n", path);
     }
     if (check_video) video_ok = dos_graph_verify();
     if (check_disk) {
@@ -260,7 +286,7 @@ int main(int argc, char **argv)
                        dos_graph_restored() ? "PASS" : "FAIL", dos_key_count());
     printf("DOS: completed %d/%d frames; clean shutdown\n", frames, frame_limit);
     return (!frame_limit || frames == frame_limit) && fixture_ok && video_ok &&
-           disk_ok && state_ok && dos_graph_restored() ? 0 : 1;
+           disk_ok && state_ok && snapshot_ok && dos_graph_restored() ? 0 : 1;
 }
 
 int stateload_system(void) { return TRUE; }

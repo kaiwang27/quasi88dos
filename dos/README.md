@@ -107,8 +107,8 @@ sector read/write, and image-file writes have a focused DOSBox-X fixture test
 using the core's FDC port interface. Save-state serialization now has a DOSBox-X
 round-trip test over synthetic CPU markers and the DOS file backend; interactive
 state-menu use on physical hardware remains unverified. Guest-driven disk
-commands, configuration saving, and snapshots remain unvalidated as machine
-features. Keep writable user media outside test mounts.
+commands, configuration saving, and interactive screenshot use remain
+unvalidated as machine features. Keep writable user media outside test mounts.
 
 ### Build and validation record
 
@@ -327,6 +327,26 @@ interactive PC-88 menus or on physical DOS hardware.
 warnings as errors for DOS-specific sources. The state round-trip passed in
 DOSBox-X at 12,000 fixed cycles; `QUASI88.STA` was 178,407 bytes and both CPU
 markers were restored. Physical state-menu behavior remains untested.
+
+### Screenshot file-output milestone
+
+Run the synthetic BMP output check:
+
+```powershell
+.\dos\build.ps1 -Target Machine -WatcomRoot D:\watcom
+.\dos\machtest.ps1 -DosBoxX D:\DOSBox-X\dosbox-x.exe -Cycles 12000 -SnapshotTest
+```
+
+`-SnapshotTest` uses the synthetic CPU ROM fixture, saves a BMP through the
+normal screen snapshot code, then checks the DOS output file's signature,
+dimensions, and byte length. The file remains in the fresh ignored test
+directory as `SAVE0000.BMP`. The synthetic screen is black; this test validates
+the screenshot writer and DOS file output, not colors from a real ROM or the
+interactive menu action on physical DOS.
+
+2026-09-29: The screenshot test passed under DOSBox-X at 3,000 fixed cycles.
+It wrote the expected 640x400 24-bit BMP (768,054 bytes). Interactive screenshot
+quality and physical DOS output remain unverified.
 
 ### Port validation record
 

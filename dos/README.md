@@ -511,7 +511,11 @@ The codec's crystal-derived rate is close to nominal. In SB mode the same
 card played at 22,787 Hz. `YS1HW` afterwards had Sound Blaster sound, so the
 return to SB mode works. The user reports a huge improvement over 8-bit and
 much less hiss. They also heard a slight pop, like a plosive into a
-microphone, at the opening.
+microphone, on heavier notes of the opening melody, not at startup. The
+log shows `clipped=0` and no resyncs, so the pop is probably in the analog
+output chain. The user considers it normal for their setup, and it is left
+unchanged. The DAC plays at 0 dB, 12 dB above the power-on level, which
+could be lowered if needed.
 
 #### DOSBox-X dynamic core: use `core=normal`
 

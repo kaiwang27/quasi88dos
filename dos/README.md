@@ -573,6 +573,25 @@ Physical AZT2320 results, user-reported:
 - Both runs reported `L/R differ=0`, because Ys I is centered. The
   earlier stereo failure did not recur.
 
+### Saving `-doswss` in `QUASI88.INI`
+
+`-doswss` and the new `-nodoswss` share option group 315 and are saved by
+the standard `OPT_SAVE` handler. A run with `-saveconfig` writes whichever
+matches the current setting. On a later start without `-noconfig`,
+`QUASI88.INI` restores it. To enable WSS permanently on the AZT2320 PC, run
+once with `QUASI88 -doswss -saveconfig` plus the usual options.
+`-nodoswss -saveconfig` turns it off again. The DOS test batches pass
+`-noconfig`, so they still choose WSS only on their command line.
+
+DOSBox-X round trip (fresh folder, SB16, real ROMs):
+1. `-doswss -saveconfig` wrote `-doswss` to `QUASI88.INI`.
+2. A run without the option tried WSS: `no WSS codec found; using Sound
+   Blaster output`.
+3. `-nodoswss -saveconfig` wrote `-nodoswss`.
+4. The next run made no WSS attempt.
+
+The existing `-ConfigTest` still passes.
+
 #### DOSBox-X dynamic core: use `core=normal`
 
 With `core=dynamic` or `core=auto`, DOSBox-X 2026.08.31 gives wrong

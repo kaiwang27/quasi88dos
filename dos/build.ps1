@@ -1,6 +1,6 @@
 param(
     [string]$WatcomRoot = $env:WATCOM,
-    [ValidateSet('Hello', 'PortTest', 'WaitTest', 'Machine')]
+    [ValidateSet('Hello', 'PortTest', 'WaitTest', 'WssTest', 'Machine')]
     [string]$Target = 'Hello'
 )
 
@@ -85,6 +85,19 @@ try {
         & $compilerPath '-y' '-bt=dos' '-l=causeway' '-fe=Q88TEST.EXE' '-fm=Q88TEST.MAP' 'PORTTEST.OBJ' 'FILEOP.OBJ' 'Z80.OBJ'
         if ($LASTEXITCODE -ne 0) { throw 'DOS link failed' }
         Write-Host "Built $outputDir\Q88TEST.EXE"
+    } elseif ($Target -eq 'WssTest') {
+        # Stand-alone WSS codec probe and tone test; shares only the PIT timer.
+        $repoRoot = Split-Path $PSScriptRoot -Parent
+        $wssIncludeDirs = @('src/sysdepend/dos', 'src/osdepend/dos', 'src', 'src/pc88', 'src/screen', 'src/screen/func', 'src/screen/func/macro', 'src/tk', 'src/tk/q8tk', 'src/tk/q8tk/q8tk', 'src/ui', 'src/ui/menu', 'src/mon', 'src/snddrv', 'src/sysdepend', 'src/osdepend')
+        $includes = $wssIncludeDirs |
+            ForEach-Object { '-i=' + (Join-Path $repoRoot $_) }
+        & $compilerPath '-y' '-c' '-bt=dos' '-3r' '-mf' '-w4' '-we' @includes '-fo=WSSTEST.OBJ' (Join-Path $PSScriptRoot 'wsstest.c')
+        if ($LASTEXITCODE -ne 0) { throw 'DOS WSS test compile failed' }
+        & $compilerPath '-y' '-c' '-bt=dos' '-3r' '-mf' '-w4' '-we' @includes '-fo=WSSWAIT.OBJ' (Join-Path $repoRoot 'src/sysdepend/dos/wait.c')
+        if ($LASTEXITCODE -ne 0) { throw 'DOS wait backend compile failed' }
+        & $compilerPath '-y' '-bt=dos' '-l=causeway' '-fe=WSSTEST.EXE' '-fm=WSSTEST.MAP' 'WSSTEST.OBJ' 'WSSWAIT.OBJ'
+        if ($LASTEXITCODE -ne 0) { throw 'DOS WSS test link failed' }
+        Write-Host "Built $outputDir\WSSTEST.EXE"
     } else {
         $repoRoot = Split-Path $PSScriptRoot -Parent
         $waitIncludeDirs = @('src/sysdepend/dos', 'src/osdepend/dos', 'src', 'src/pc88', 'src/screen', 'src/screen/func', 'src/screen/func/macro', 'src/tk', 'src/tk/q8tk', 'src/tk/q8tk/q8tk', 'src/ui', 'src/ui/menu', 'src/mon', 'src/snddrv', 'src/sysdepend', 'src/osdepend')

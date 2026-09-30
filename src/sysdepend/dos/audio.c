@@ -233,7 +233,7 @@ static int sb_read(unsigned char *value)
 }
 
 /* Remaining transfers minus one: bytes on 8-bit DMA, words on 16-bit DMA. */
-static unsigned read_dma_count(void)
+static unsigned read_dma_count_raw(void)
 {
     unsigned port = dma_count_port();
     unsigned low, high;
@@ -241,6 +241,21 @@ static unsigned read_dma_count(void)
     low = inp(port);
     high = inp(port);
     return low | (high << 8);
+}
+
+/* The count is read as two bytes while the transfer runs. If the low byte
+   wraps between them, the value is off by 256 and looks like almost a whole
+   extra ring pass. Accept a read only when the next agrees within the
+   normal decrement. */
+static unsigned read_dma_count(void)
+{
+    unsigned a = read_dma_count_raw(), b = a, i;
+    for (i = 0; i < 8U; ++i) {
+        b = read_dma_count_raw();
+        if (((a - b) & 0xffffU) <= 2U) return b;
+        a = b;
+    }
+    return b;
 }
 
 static int sb_reset(void)

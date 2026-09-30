@@ -349,6 +349,102 @@ with `BLASTER=A220 I5 D1 T4`, DSP 3.01 answered but DMA did not move
 The card needs its DOS initialization in that mode, for example from
 `DOSSTART.BAT`.
 
+### WSS bring-up tool (`WSSTEST.EXE`)
+
+The next goal is a 16-bit Windows Sound System (WSS) backend for the user's
+AZT2320. In Sound Blaster mode that card reports DSP 3.01 and plays only
+8-bit. The Linux ALSA `azt2320` driver enables WSS by writing DSP commands
+`09h`, `00h` to the SB port at +`0Ch`, then waiting 5 ms. It passes the
+card's Plug and Play WSS port directly to the AD1848/CS4231 codec driver.
+No command to return to SB mode was found in that driver.
+
+`.\dos\build.ps1 -Target WssTest -WatcomRoot D:\watcom` builds
+`build-dos\WSSTEST.EXE`. It links only the DOS PIT timer (`wait.c`) and
+compiles with warnings treated as errors. The tool:
+
+- Reads `BLASTER`, plus an optional `Q88WSS` in the same format (`A` codec
+  port, `I` IRQ, `D` 8-bit DMA channel).
+- Probes 530/534, 604/608, E80/E84, and F40/F44 for a codec. The index
+  register must hold the written index, I1 must keep a test value (restored
+  afterwards), and I12 must report ID `Ah`.
+- With `/AZT`, if no codec was found, sends the AZT2320 WSS switch and probes
+  again.
+- Reports I12, MODE2/I25 support, and I0-I11. It then sets 16-bit mono
+  22,050 Hz (I8 `47h`) with single-channel DMA and autocalibration, and
+  plays a 689 Hz tone for 3 s. The codec interrupts twice per 16,384-sample
+  ring.
+- Measures DMA progress, codec IRQs, and the playback rate against the PIT.
+- Restores the DAC and pin registers, the DMA mask, the IRQ vector, and the
+  PIC masks, then checks whether the Sound Blaster DSP still answers.
+
+DOSBox-X has no AZT2320 or standalone WSS emulation. With an SB16, the tool
+found no codec, `/AZT` failed cleanly, and the DSP still answered. A
+`gustype=max` scan found a false positive at base+104h (the GF1 register
+select/data pair; I12 reads `00h`). The I12 ID check now rejects it.
+DOSBox-X's GUS MAX codec was not located, so codec playback is untested
+until the physical run.
+
+Physical AZT2320 result, user-reported 2026-09-30 from an F8 command
+prompt. Windows 98 Device Manager showed I/O `220-22F`, `388-38F`, and
+`534-537`, IRQ 5, and DMA 1 and 0. `CONFIG.SYS` and `AUTOEXEC.BAT` load no
+Aztech software. Before the switch, no codec answered at any candidate port.
+After `09h, 00h`, a codec answered at `534`: I12 `CAh` (ID `Ah`), MODE2
+supported, I25 `80h`, which is CS4231-class. Autocalibration completed
+(I8 `47h`, I9 `0Ch`). The user heard the tone. There were 8 codec IRQs in
+3 s at 8,192 samples per IRQ, about 21,800 Hz, consistent with 22,050 Hz.
+The reported DMA rate of 169,412 Hz was a measurement error. The test read
+the 8237 count thousands of times per second, and a low/high byte tear
+looked like almost a full extra ring pass. Afterwards the DSP still
+answered, but QUASI88's 8-bit SB DMA did not move (`7FFF -> 7FFF`) until
+power-off. The card stays in WSS mode.
+
+Changes after that run:
+
+- `WSSTEST` and QUASI88 read the 8237 count until two reads agree within
+  2, so a torn byte pair cannot be used. QUASI88 reads it once per frame,
+  where a tear was rare but could cause a false resync.
+- With `/AZT`, `WSSTEST` sends `09h, 01h` after the tone to return to Sound
+  Blaster mode. That is `GALAXY_COMMAND_SB8MODE` in the ALSA Aztech Sound
+  Galaxy (AZT1605/AZT2316) driver. That driver defines the command but never
+  sends it, and does not cover the AZT2320, so its effect on this card needs
+  the physical test. `WSSTEST` then resets the DSP, starts a single-cycle
+  8-bit SB transfer of silence, and reports whether the 8237 count moves. It
+  pauses and resets the DSP before the block ends, so no SB IRQ is raised.
+- `WSSTEST` also reports a playback rate derived from the codec IRQ count.
+
+DOSBox-X `sbtype=sbpro2` (DSP 3.02, no WSS codec): `WSSTEST /AZT` found no
+codec, sent both mode commands, and then reported `Sound Blaster 8-bit DMA 1
+test: moves`. The QUASI88 12,000-cycle `-SoundTest` and `-Sound8Test`
+regressions pass with the new count read.
+
+Physical follow-up, user-reported: after an F8 boot, `WSSTEST /AZT` played
+the tone and returned the card to SB mode with `09h, 01h`, and Ys I had
+sound. After Windows 98 "Restart in MS-DOS mode", `WSSTEST` found the codec
+without the switch, so the Windows 98 WDM driver leaves the card in WSS
+mode. That explains the earlier SB DMA stall in that mode. After
+`WSSTEST /AZT`, QUASI88 reported SB DMA and IRQs running (22,753 Hz, 11
+IRQs), but Ys I was silent. The analog path is probably muted.
+`WSSTEST /SB` (`SBMODE.BAT`) was added for this. It logs the SB Pro mixer
+registers (`04h`, `0Ah`, `0Ch`, `0Eh`, `22h`, `26h`, `28h`, `2Eh`). If the
+codec answers, it also logs I0-I7 and sets I2-I5 to `0Ch` and I6/I7 to
+`08h`, the unmuted values observed after an F8 boot. It then sends
+`09h, 01h`, logs the SB Pro mixer again, and runs the SB DMA check. `/AZT`
+performs the same restore after the tone. In DOSBox-X with `sbtype=sbpro2`
+and `sb16`, `/SB` reported `RESULT: PASS (Sound Blaster mode restored)`.
+
+Physical result, user-reported: after Windows 98 "Restart in MS-DOS mode",
+`WSSTEST /SB` restored Sound Blaster mode and Ys I had sound. It ran for
+45.3 s with 0 underruns, and the card played at 22,735 Hz. The logs show
+what the Windows driver changed. The codec had I4/I5 (aux 2) `93h`, muted
+and attenuated, and I6/I7 (DAC) `87h`, muted. After an F8 boot they were
+`0Ch` and `08h`. On this card the SB output evidently passes through the
+codec, so those mutes silenced SB mode. The SB Pro mixer read identically
+in both boots (`04h`, `22h`, `26h`, `28h`, and `2Eh` all `DDh`). The test
+build also reset that mixer. The reset lowered voice/master to `99h` and
+set CD/line to `00h`, so it was removed; `/SB` now only logs the SB Pro
+mixer. For Windows 98 MS-DOS mode, `WSSTEST /SB` can be added to
+`C:\WINDOWS\DOSSTART.BAT`.
+
 #### DOSBox-X dynamic core: use `core=normal`
 
 With `core=dynamic` or `core=auto`, DOSBox-X 2026.08.31 gives wrong

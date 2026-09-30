@@ -1,3 +1,5 @@
+/* Copyright (c) 2026, Kai Wang. Part of the QUASI88 MS-DOS port.
+   SPDX-License-Identifier: BSD-3-Clause (see LICENSE). */
 /* WSSTEST: probe a Windows Sound System (AD1848/CS4231-compatible) codec
    and play a 16-bit test tone through it. With /AZT, an Aztech AZT2320 in
    Sound Blaster mode is first switched to WSS mode (DSP commands 09h, 00h,

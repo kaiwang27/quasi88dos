@@ -1,3 +1,5 @@
+/* Copyright (c) 2026, Kai Wang. Part of the QUASI88 MS-DOS port.
+   SPDX-License-Identifier: BSD-3-Clause (see LICENSE). */
 /* DOS file backend for QUASI88. Distributed under the repository license.
  * Uses the Open Watcom DOS runtime; no LFN or host OS services required.
  * Initial filename support is ASCII 8.3 only, with DOS drive semantics.

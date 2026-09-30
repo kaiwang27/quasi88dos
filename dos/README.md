@@ -209,11 +209,13 @@ path is tested only on real hardware.
 
 ## License
 
-QUASI88 is under the BSD 3-Clause license ([LICENSE](../LICENSE)). The sound
+QUASI88 is under the BSD 3-Clause license ([LICENSE](../LICENSE)). The MS-DOS
+port is copyright (c) 2026 Kai Wang, under the same license. The sound
 emulation comes from MAME/XMAME under the
 [MAME license](../src/snddrv/xmame/license.txt): it may not be sold or used
 commercially, and modified versions must be distributed with complete source
 code. A binary release of this port therefore has to stay non-commercial and
 point to this source.
 
-Original QUASI88 by Shozo Fukunaga; SDL2 port by Bubio.
+Original QUASI88 by Shozo Fukunaga; SDL2 port by Bubio; MS-DOS port by Kai
+Wang. Source: <https://github.com/kaiwang27/quasi88dos>.

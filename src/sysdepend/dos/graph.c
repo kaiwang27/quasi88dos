@@ -1,3 +1,5 @@
+/* Copyright (c) 2026, Kai Wang. Part of the QUASI88 MS-DOS port.
+   SPDX-License-Identifier: BSD-3-Clause (see LICENSE). */
 /* VGA mode 12h, planar write mode 0, or with -dosvesa a VESA 640x480
  * 256-color mode (VBE, banked window). Headless RGB565 path retained.
  * The frame buffer holds logical colors (one byte per pixel). In mode 12h

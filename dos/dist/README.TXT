@@ -167,6 +167,9 @@ QUASI88 is distributed under the BSD 3-Clause license (LICENSE.TXT). The
 sound emulation comes from MAME/XMAME, whose license (MAME.TXT) does not
 allow selling it or using it commercially, and requires the complete
 source code to accompany modified versions. The source code of this port
-is in the project repository.
+is at:
 
-Original QUASI88 by Shozo Fukunaga. SDL2 port by Bubio.
+         https://github.com/kaiwang27/quasi88dos
+
+Original QUASI88 by Shozo Fukunaga. SDL2 port by Bubio. MS-DOS port
+copyright (c) 2026 Kai Wang, under the same BSD 3-Clause license.

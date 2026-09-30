@@ -6,17 +6,17 @@
 
 QUASI88 is a powerful and highly compatible PC-8801 emulator, originally created by Shozo Fukunaga. This version is a multi-platform port based on SDL2, providing a modern experience across macOS, Windows, and Linux.
 
-> **This repository is a fork of [bubio/QUASI88](https://github.com/bubio/QUASI88) that adds an MS-DOS port.** The DOS port is documented in [dos/README.md](dos/README.md). The desktop (SDL2) code is unchanged from upstream, and the badges, release downloads, and clone URL below refer to the upstream project, which does not include the DOS build.
+> **This repository ([kaiwang27/quasi88dos](https://github.com/kaiwang27/quasi88dos)) is a fork of [bubio/QUASI88](https://github.com/bubio/QUASI88) that adds an MS-DOS port.** The DOS port is documented in [dos/README.md](dos/README.md). The desktop (SDL2) code is unchanged from upstream. Pre-built desktop packages are published by the upstream project; this repository's releases contain the MS-DOS build.
 
 <p align="center">
-  <a href="https://github.com/bubio/QUASI88/releases/latest">
-    <img src="https://img.shields.io/github/v/release/bubio/QUASI88" alt="Latest Release">
+  <a href="https://github.com/kaiwang27/quasi88dos/releases/latest">
+    <img src="https://img.shields.io/github/v/release/kaiwang27/quasi88dos" alt="Latest Release">
   </a>
-  <a href="https://github.com/bubio/QUASI88/blob/main/LICENSE">
-    <img src="https://img.shields.io/github/license/bubio/QUASI88" alt="License">
+  <a href="https://github.com/kaiwang27/quasi88dos/blob/main/LICENSE">
+    <img src="https://img.shields.io/github/license/kaiwang27/quasi88dos" alt="License">
   </a>
-  <a href="https://github.com/bubio/QUASI88/releases/latest">
-    <img src="https://img.shields.io/github/downloads/bubio/QUASI88/total.svg" alt="Downloads">
+  <a href="https://github.com/kaiwang27/quasi88dos/releases/latest">
+    <img src="https://img.shields.io/github/downloads/kaiwang27/quasi88dos/total.svg" alt="Downloads">
   </a>
 </p>
 
@@ -52,8 +52,9 @@ QUASI88 emulates various components of the PC-8801:
 
 ### Installation (Pre-built Releases)
 
-Download the latest version for your platform from the [Releases](https://github.com/bubio/QUASI88/releases) page.
+The desktop packages below are published by the upstream project: download the latest version for your platform from the [upstream Releases](https://github.com/bubio/QUASI88/releases) page. The MS-DOS build (`Q88DOS.ZIP`) is published on [this repository's Releases](https://github.com/kaiwang27/quasi88dos/releases) page.
 
+*   **MS-DOS**: Extract `Q88DOS.ZIP` to a directory on the DOS PC, put your ROM images in its `ROM` directory, and run `QUASI88`. See [dos/README.md](dos/README.md).
 *   **Windows**: Just extract the `.zip` file and double-click **`QUASI88.exe`**. No installation or command line required!
 *   **macOS**: Open the `.dmg` and copy `QUASI88.app` to your Applications folder.
 *   **Linux**: 
@@ -75,8 +76,8 @@ QUASI88 uses CMake for its build system.
 
 **Build Commands:**
 ```bash
-git clone https://github.com/bubio/QUASI88.git
-cd QUASI88
+git clone https://github.com/kaiwang27/quasi88dos.git
+cd quasi88dos
 cmake -S. -Bbuild -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
@@ -115,7 +116,11 @@ If you encounter issues, please check the [FAQ](doc/faq.txt) or the [Manual](doc
 
 This project is distributed under the terms of its original license (Revised BSD-style). See the `LICENSE` file for details. It incorporates code from SDL2 (Zlib), MAME/XMAME, and fmgen.
 
+The MS-DOS port is copyright (c) 2026 Kai Wang and is distributed under the same BSD 3-Clause license. The MAME/XMAME sound code has its own license (`src/snddrv/xmame/license.txt`), which does not permit selling it or using it commercially and requires complete source code with modified versions.
+
 ## Acknowledgements
 
 Original creator: **Shozo Fukunaga**.
+SDL2 port: **Bubio** ([bubio/QUASI88](https://github.com/bubio/QUASI88)).
+MS-DOS port: **Kai Wang**.
 Special thanks to the contributors of SDL2, MAME, and fmgen.

@@ -1,3 +1,5 @@
+/* Copyright (c) 2026, Kai Wang. Part of the QUASI88 MS-DOS port.
+   SPDX-License-Identifier: BSD-3-Clause (see LICENSE). */
 #ifndef FILENAME_H_INCLUDED
 #define FILENAME_H_INCLUDED
 

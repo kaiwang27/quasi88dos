@@ -1,3 +1,5 @@
+/* Copyright (c) 2026, Kai Wang. Part of the QUASI88 MS-DOS port.
+   SPDX-License-Identifier: BSD-3-Clause (see LICENSE). */
 /* PIT-count pacing. Reads the BIOS timer and channel 0 without changing either. */
 #include <i86.h>
 #include <conio.h>

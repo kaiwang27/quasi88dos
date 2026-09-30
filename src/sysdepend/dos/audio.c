@@ -1,3 +1,5 @@
+/* Copyright (c) 2026, Kai Wang. Part of the QUASI88 MS-DOS port.
+   SPDX-License-Identifier: BSD-3-Clause (see LICENSE). */
 /* DMA audio output for the DOS target. Sound Blaster-compatible cards play
    16-bit on an SB16 (DSP 4.xx), otherwise 8-bit mono. With -doswss, a
    Windows Sound System (AD1848/CS4231-compatible) codec plays 16-bit PCM;

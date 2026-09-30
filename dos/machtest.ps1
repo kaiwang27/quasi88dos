@@ -1,3 +1,5 @@
+# Copyright (c) 2026, Kai Wang. Part of the QUASI88 MS-DOS port.
+# SPDX-License-Identifier: BSD-3-Clause (see LICENSE).
 param(
     [string]$DosBoxX,
     [ValidateRange(100, 1000000)] [int]$Cycles = 3000,

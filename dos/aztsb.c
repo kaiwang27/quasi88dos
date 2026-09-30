@@ -1,3 +1,5 @@
+/* Copyright (c) 2026, Kai Wang. Part of the QUASI88 MS-DOS port.
+   SPDX-License-Identifier: BSD-3-Clause (see LICENSE). */
 /* AZTSB: return an Aztech AZT2320 to Sound Blaster mode, for DOSSTART.BAT.
 
    The Windows 98 driver leaves the card in Windows Sound System (WSS) mode

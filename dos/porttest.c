@@ -1,3 +1,5 @@
+/* Copyright (c) 2026, Kai Wang. Part of the QUASI88 MS-DOS port.
+   SPDX-License-Identifier: BSD-3-Clause (see LICENSE). */
 /* DOS bring-up tests using the unchanged QUASI88 Z80 core and OSD API. */
 #include <stdio.h>
 #include <string.h>

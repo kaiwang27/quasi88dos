@@ -1,3 +1,5 @@
+/* Copyright (c) 2026, Kai Wang. Part of the QUASI88 MS-DOS port.
+   SPDX-License-Identifier: BSD-3-Clause (see LICENSE). */
 /* DOS entry point: bounded headless tests or an interactive VGA session. */
 #include <stdio.h>
 #include "quasi88.h"

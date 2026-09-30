@@ -1,8 +1,13 @@
 param(
     [string]$WatcomRoot = $env:WATCOM,
     [ValidateSet('Hello', 'PortTest', 'WaitTest', 'WssTest', 'AztSb', 'Machine')]
-    [string]$Target = 'Hello'
+    [string]$Target = 'Machine'
 )
+# Builds the DOS programs with Open Watcom v2 into build-dos\.
+#   Machine (default)  QUASI88.EXE, the emulator
+#   AztSb              AZTSB.EXE, returns an AZT2320 to Sound Blaster mode
+#   WssTest            WSSTEST.EXE, WSS codec probe and tone test
+#   PortTest, WaitTest, Hello   small bring-up test programs
 
 $ErrorActionPreference = 'Continue'
 # Keep PowerShell cmdlets fail-fast while allowing warning text emitted on

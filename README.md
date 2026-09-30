@@ -44,6 +44,7 @@ QUASI88 emulates various components of the PC-8801:
 *   **Windows**: x64, x86, and ARM64. Portable `.zip` packages.
 *   **Linux**: x86_64 and arm64. **AppImage** (Standalone), `.deb`, and `.rpm`.
 *   **Raspberry Pi**: armhf (32-bit) `.deb` packages.
+*   **MS-DOS**: a 32-bit DOS build for real retro PCs and DOSBox-X, with VGA/VESA display and Sound Blaster / WSS sound. See [dos/README.md](dos/README.md).
 
 ## Getting Started
 
@@ -77,6 +78,8 @@ cd QUASI88
 cmake -S. -Bbuild -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
+
+The MS-DOS build uses Open Watcom v2 instead of CMake and SDL2; see [dos/README.md](dos/README.md#building).
 
 ## Usage
 

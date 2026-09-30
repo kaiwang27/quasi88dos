@@ -1,0 +1,11 @@
+Put your PC-8801 ROM images in this directory.
+
+  N88.ROM      required   N88-BASIC main ROM (32,768 bytes)
+  N88_0.ROM    N88_1.ROM  N88_2.ROM  N88_3.ROM   extension ROMs
+  N80.ROM                 N-BASIC ROM
+  DISK.ROM                disk subsystem ROM
+  KANJI1.ROM   KANJI2.ROM kanji ROMs
+  FONT.ROM                font (a built-in font is used if missing)
+
+The other QUASI88 names also work: N88EXT0-3.ROM, N88N.ROM, N88SUB.ROM,
+N88KNJ1.ROM, N88KNJ2.ROM. No ROM images are distributed with QUASI88.

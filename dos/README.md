@@ -613,8 +613,9 @@ mode gets Sound Blaster sound.
 In DOSBox-X at 30,000 cycles, `sbtype=sbpro2` and `sb16` reported `Sound
 Blaster mode at 220` with errorlevel 0 and a moving DMA count. With
 `sbtype=none` it reported `no Sound Blaster DSP at 220` with errorlevel 1.
-The WSS-mode path runs only on the physical AZT2320, where this sequence
-worked as `WSSTEST /SB`; `AZTSB.EXE` itself is not yet tested there.
+The WSS-mode path runs only on the physical AZT2320. There, after Windows
+98 "Restart in MS-DOS mode", the user ran `AZTSB` and then `YS1HW.BAT`,
+which played SB 8-bit mono.
 
 ### Interactive defaults, exact VGA colors, and extra keys
 
@@ -682,7 +683,10 @@ follow the PC-88 layout. The key assignments mirror SDL2's
     shows backslash as the yen sign). The JP106 yen key sends 7Dh. The user's
     keyboard type and the scan code are still to be confirmed with
     `-doskeylog`.
-  - The STOP test and `AZTSB` results were not yet reported.
+  - `AZTSB` after Windows 98 "Restart in MS-DOS mode": the user reports
+    that `YS1HW.BAT` then played SB 8-bit mono. So `AZTSB` restores Sound
+    Blaster mode from the Windows driver's WSS state on the physical card.
+  - The STOP test result was not yet reported.
 
 #### DOSBox-X dynamic core: use `core=normal`
 

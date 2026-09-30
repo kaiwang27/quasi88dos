@@ -4,7 +4,13 @@ param(
     [string]$Target = 'Hello'
 )
 
-$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Continue'
+# Keep PowerShell cmdlets fail-fast while allowing warning text emitted on
+# stderr by native Watcom tools to pass through as ordinary diagnostics.
+$PSDefaultParameterValues['*:ErrorAction'] = 'Stop'
+# Open Watcom reports warnings on stderr with a zero exit code. PowerShell 7
+# otherwise turns those diagnostic records into terminating errors here.
+$PSNativeCommandUseErrorActionPreference = $false
 if (-not $WatcomRoot) {
     $compiler = Get-Command wcl386.exe -ErrorAction Stop
     $WatcomRoot = Split-Path (Split-Path $compiler.Source -Parent) -Parent
@@ -39,7 +45,7 @@ try {
         New-Item -ItemType Directory -Force -Path $machineDir | Out-Null
         Push-Location $machineDir
         try {
-            $includeDirs = @('src/sysdepend/dos', 'src/osdepend/dos', 'src', 'src/pc88', 'src/screen', 'src/screen/func', 'src/screen/func/macro', 'src/tk', 'src/tk/q8tk', 'src/tk/q8tk/q8tk', 'src/ui', 'src/ui/menu', 'src/mon', 'src/snddrv', 'src/sysdepend', 'src/osdepend')
+            $includeDirs = @('src/sysdepend/dos', 'src/osdepend/dos', 'src', 'src/pc88', 'src/screen', 'src/screen/func', 'src/screen/func/macro', 'src/tk', 'src/tk/q8tk', 'src/tk/q8tk/q8tk', 'src/ui', 'src/ui/menu', 'src/mon', 'src/snddrv', 'src/sysdepend', 'src/osdepend', 'src/snddrv/xmame', 'src/snddrv/xmame/quasi88', 'src/snddrv/xmame/src', 'src/snddrv/xmame/src/sound')
             $includes = $includeDirs | ForEach-Object { '-i=' + (Join-Path $repoRoot $_) }
             $linkLines = @('system causeway', 'name ../QUASI88.EXE', 'option map=QUASI88.MAP', 'option stack=131072')
             $index = 0
@@ -47,16 +53,16 @@ try {
                 $object = 'Q{0:D3}.OBJ' -f $index++
                 $warningOptions = @()
                 if ($source.EndsWith('.asm')) {
-                    & $assemblerPath '-bt=dos' '-3p' '-mf' ('-fo=' + $object) (Join-Path $repoRoot $source)
+                & $assemblerPath '-bt=dos' '-3p' '-mf' ('-fo=' + $object) (Join-Path $repoRoot $source) 2>&1
                 } else {
-                    if ($source -like 'src/*depend/dos/*') { $warningOptions = @('-we') }
-                    & $compilerPath '-y' '-c' '-bt=dos' '-3r' '-mf' '-j' '-w4' @warningOptions @includes ('-fo=' + $object) (Join-Path $repoRoot $source)
+                    if ($source -like 'src/*depend/dos/*' -and $source -ne 'src/sysdepend/dos/audio.c') { $warningOptions = @('-we') }
+                    & $compilerPath '-y' '-c' '-bt=dos' '-3r' '-mf' '-j' '-w4' '-dUSE_SOUND' '-dM_PI=3.14159265358979323846' '-dPI=M_PI' @warningOptions @includes ('-fo=' + $object) (Join-Path $repoRoot $source) 2>&1
                 }
                 if ($LASTEXITCODE -ne 0) { throw "DOS compile failed: $source" }
                 $linkLines += "file $object"
             }
             $linkLines | Set-Content 'MACHINE.LNK' -Encoding ASCII
-            & (Join-Path $hostBin 'wlink.exe') '@MACHINE.LNK'
+            & (Join-Path $hostBin 'wlink.exe') '@MACHINE.LNK' 2>&1
             if ($LASTEXITCODE -ne 0) { throw 'DOS machine link failed' }
             Write-Host "Built $outputDir\QUASI88.EXE"
         } finally { Pop-Location }

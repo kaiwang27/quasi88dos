@@ -130,10 +130,100 @@ stick before launch, run with `-joystick`, and recheck all directions and A/B.
 ### Scope and ROM checks
 
 The standard machine core, ROM loader, main/sub CPUs, video renderer, disk
-controller code, and menu code are linked. Sound and monitor support are
-disabled using existing build options. Startup, frame execution, and shutdown
-use the normal core lifecycle. DOS-specific code remains under `sysdepend/dos`
-and `osdepend/dos`; desktop build files and existing core sources are unchanged.
+controller code, and menu code are linked. The XMAME sound synthesis core is
+enabled and its output is sent to a Sound Blaster-compatible DSP using 8-bit
+mono auto-init DMA at 22,222 Hz. The DSP's integer time constant 211 yields
+22,222 Hz; the mixer uses the same rate to prevent long-term DMA drift. The
+backend reads `BLASTER` (`A`, `I`, and `D`)
+when present; otherwise it tries the common defaults `220h`, IRQ 5, DMA 1.
+The DMA buffer is allocated in conventional memory and the selected IRQ handler
+acknowledges DSP interrupts. The backend saves and unmasks the configured PIC
+IRQ line (including IRQ2 for slave-PIC lines), then restores its prior mask and
+interrupt vector on shutdown. If no DSP responds, the emulator continues silently;
+use `-dosnosound` to disable sound explicitly. Volume control and FMGEN are not
+available in this DOS milestone. The backend has compiled and passed the
+DOSBox-X DMA/IRQ transfer check. A 60-frame DOSBox-X run at 12,000 cycles moved
+DMA data and serviced 14 Sound Blaster IRQs. The DOS backend sets
+the core sample rate before the YM devices initialize, and the smoke test checks
+that audio samples reach the DMA stream. A DOSBox-X run without a responding
+emulated SB device reports `Sound Blaster not detected`. Startup, frame execution,
+and shutdown use the normal core lifecycle.
+DOS-specific code remains under `sysdepend/dos` and `osdepend/dos`; desktop
+build files and existing core sources are unchanged.
+
+### DOSBox-X audio comparison
+
+All audio tests documented here use DOSBox-X's emulated Sound Blaster, not an
+AZT2320 or another physical sound card. The interactive logs report base
+`220h`, IRQ 7, DMA 1. Run `BASIC.BAT`, enter `NEW CMD`, then type
+`CMD PLAY "T32L1C"` at the BASIC prompt. This plays the long sustained tone
+used for comparison. Exit with Ctrl+Q to write `Q88.LOG`. `BASIC.BAT` selects
+OPN (Sound Board I), matching the Windows test. The Ys I game launchers remain
+on OPNA (Sound Board II).
+
+The user reports that Windows QUASI88 works fine and sounds normal, with a
+clean fade and a shorter tone. Windows uses MAME OPN, 44,100 Hz, and an SDL
+buffer of 2,048 samples. In DOSBox-X, the DOS build sounds longer or dragging
+and noisy, like a weak radio signal, with a rough fade. The user heard the
+same problem on OPN and OPNA. Correcting the original board mismatch (the
+first DOS BASIC test used OPNA via `-sd2`) did not improve it.
+
+The DOS backend defaults to 22,222 Hz 8-bit mono using DSP time constant 211.
+The experimental `-dossb44k` option selects 43,478 Hz 8-bit mono using time
+constant 233; the integer time constant cannot produce exactly 44,100 Hz.
+Both modes downmix the MAME core's stereo 16-bit output to mono and reduce it
+to unsigned 8-bit PCM. `BASIC44.BAT` repeats the same `T32L1C` test at the
+higher rate; it does not change the output bit depth.
+
+The latest unfiltered OPN logs show zero underruns in both modes. The
+22,222 Hz run reports 399,915 samples, 88,273 non-silent samples, peak 1,020,
+minimum DMA lead 13,387, and zero low-lead/underrun frames over 997 emulated
+frames. The 43,478 Hz run reports 671,005 samples, 172,592 non-silent samples,
+the same peak 1,020, minimum lead 8,481, and zero low-lead/underrun frames over
+855 frames. The non-silent counts correspond to about 3.97 seconds of active
+tone at both rates. A peak of 1,020 maps to roughly four
+8-bit steps on either side of silence, only about eight output values total.
+The higher-rate run therefore produced about twice as many samples without
+increasing the tone's quantized amplitude, which matches the user's report
+that it sounds the same. Coarse 8-bit quantization of this quiet tone is a
+likely source of the noisy fade, but it does not yet explain the longer tone.
+
+An earlier filtered-tone run was reported as less hissy but shattered. Its
+`FILTONE.LOG` reports peak 504 and 1,305 underrun frames over 30,436 frames,
+so it is not a clean filter-quality comparison. A separate DOSBox-X stress
+test at 12,000 cycles also reports underruns because the emulated machine
+runs more slowly than the independent DSP clock. Neither result describes
+the latest unfiltered pair, which has zero underruns.
+
+Current evidence rules out the OPN/OPNA mismatch and underruns in the latest
+tone runs as explanations for the sound difference. The DOS path's 8-bit mono
+conversion is a leading noise-quality suspect. The longer/dragging tone remains
+unexplained; the two DOS logs have different run lengths and there is no
+corresponding Windows PCM log for duration comparison. Continue this
+investigation in DOSBox-X, examining PCM scaling/quantization and tone timing
+separately. Do not infer physical sound-card behavior from these tests.
+
+The active backend uses a 32 KiB DMA ring with a 16 KiB initial lead and carries
+fractional samples across frames to keep its producer rate aligned with the
+selected DSP rate. `PCMZERO.BAT` sends unsigned 8-bit center samples while
+keeping DSP/DMA/IRQ active; `NOSND.BAT` disables the DSP. `FILTONE.BAT` and
+`FILTER.BAT` enable the optional experimental high-frequency roll-off for OPN
+tone and OPNA game tests, respectively. The user heard less hiss but a
+shattered tone with the filter, so it remains off by default.
+
+To check that DOSBox-X's Sound Blaster transfer and IRQ path both advance, run
+at least 60 frames with the split real-ROM set:
+
+```powershell
+.\dos\build.ps1 -Target Machine -WatcomRoot D:\watcom
+.\dos\machtest.ps1 -DosBoxX D:\DOSBox-X\dosbox-x.exe -Cycles 12000 -RomDirectory D:\88rom -Mk2srDirectory D:\88rom\pc8801mk2sr -Frames 60 -SoundTest
+```
+
+The sound check requires a changed DMA count and at least one IRQ in
+`MACHINE.OUT`. It validates DMA/IRQ delivery even when the ROM produces silence;
+the BASIC `CMD PLAY "T32L1C"` check is still needed to confirm audible
+synthesized audio. Add `-Sound44kTest` to this command to verify that DOSBox-X
+selects the experimental 43,478 Hz mode.
 
 The DOS entry point requires a 32768-byte `N88.ROM`, or `N88N.ROM`/`N80.ROM`
 when `-n` selects N-BASIC, before starting the core. This avoids silently running
@@ -144,9 +234,8 @@ Passing startup therefore does not prove ROM completeness or a working BASIC
 prompt. Use `-verbose 1` to see each ROM loading result.
 
 Game-port joystick support maps one controller's X/Y axes and buttons A/B;
-calibration is sampled at startup. Audio output is not
-implemented. Mouse input requires an installed DOS INT 33h driver and is polled
-once per emulated frame. Frame pacing reads the
+calibration is sampled at startup. Mouse input requires an installed DOS INT
+33h driver and is polled once per emulated frame. Frame pacing reads the
 BIOS tick and PIT channel 0 counter without reprogramming the timer or hooking
 interrupts. It busy-polls the hardware timer for sub-frame waits, so it uses
 the CPU while waiting; DOS has no portable high-resolution sleep path in this
@@ -155,9 +244,10 @@ The QUASI88 toolbar is visible on the reported physical PC. DOS mouse input
 polls the standard INT 33h driver while VGA is active and forwards absolute
 pointer movement and button transitions through the existing screen/UI event
 path. The user confirmed physical pointer movement and toolbar clicks, then
-confirmed the cursor residue is gone after the planar redraw fix. No interrupt
-vectors, PIT, DMA, or sound registers are modified. D88 image mounting, FDC
-sector read/write, and image-file writes have a focused DOSBox-X fixture test
+confirmed the cursor residue is gone after the planar redraw fix. The sound
+backend owns its selected IRQ vector and DMA channel only while audio is active.
+D88 image mounting, FDC sector read/write, and image-file writes have a focused
+DOSBox-X fixture test
 using the core's FDC port interface. Save-state serialization now has a DOSBox-X
 round-trip test over synthetic CPU markers and the DOS file backend; interactive
 state-menu use on physical hardware remains unverified. Guest-driven disk

@@ -9,7 +9,9 @@ param(
     [switch]$StateTest,
     [switch]$SnapshotTest,
     [switch]$ConfigTest,
-    [switch]$JoystickMode
+    [switch]$JoystickMode,
+    [switch]$SoundTest,
+    [switch]$Sound44kTest
 )
 $ErrorActionPreference = 'Stop'
 if ($Mk2srDirectory -and -not $RomDirectory) { throw '-Mk2srDirectory requires the base -RomDirectory.' }
@@ -17,6 +19,7 @@ if ($DiskTest -and -not $RomDirectory) { throw '-DiskTest requires real ROMs via
 if ($StateTest -and $RomDirectory) { throw '-StateTest currently uses the synthetic CPU marker ROMs; omit -RomDirectory.' }
 if ($SnapshotTest -and $RomDirectory) { throw '-SnapshotTest currently uses the synthetic CPU marker ROMs; omit -RomDirectory.' }
 if ($ConfigTest -and $RomDirectory) { throw '-ConfigTest currently uses the synthetic CPU marker ROMs; omit -RomDirectory.' }
+if (($SoundTest -or $Sound44kTest) -and (-not $RomDirectory -or $Frames -lt 60)) { throw 'Sound tests require real ROMs and at least 60 frames.' }
 if (-not $DosBoxX) { $DosBoxX = (Get-Command dosbox-x.exe -ErrorAction Stop).Source }
 $DosBoxX = (Resolve-Path -LiteralPath $DosBoxX).Path
 $repoRoot = Split-Path $PSScriptRoot -Parent
@@ -35,6 +38,7 @@ foreach ($name in @('ROM', 'EMPTY', 'SHORT')) {
 }
 [IO.File]::WriteAllBytes((Join-Path $testDir 'SHORT\N88.ROM'), [byte[]]@(0))
 $configSaveOption = ''
+$soundRateOption = if ($Sound44kTest) { '-dossb44k' } else { '' }
 if ($RomDirectory) {
     $RomDirectory = (Resolve-Path -LiteralPath $RomDirectory).Path
     # Copy only ROM files. Originals and all disk images remain outside the mount.
@@ -107,7 +111,7 @@ QUASI88 -romdir EMPTY > MISSING.OUT
 if not errorlevel 1 goto fail
 QUASI88 -romdir SHORT > SHORT.OUT
 if not errorlevel 1 goto fail
-QUASI88 -dosframes $Frames $checkOption $configSaveOption > MACHINE.OUT
+QUASI88 -dosframes $Frames $checkOption $soundRateOption $configSaveOption > MACHINE.OUT
 if errorlevel 1 goto fail
 $diskTestCommands
 echo PASS > RESULT.TXT
@@ -128,6 +132,12 @@ memsize=16
 core=normal
 cputype=386
 cycles=fixed $Cycles
+[sblaster]
+sbtype=sb16
+sbbase=220
+irq=5
+dma=1
+blaster environment variable=true
 [joystick]
 joysticktype=none
 [autoexec]
@@ -149,6 +159,7 @@ try {
     $short = Get-Content (Join-Path $testDir 'SHORT.OUT') -Raw
     if ($result -ne 'PASS' -or $output -notmatch "completed $Frames/$Frames frames; clean shutdown" -or
         $output -notmatch 'game-port joystick not detected' -or
+        $output -notmatch 'audio PCM input: [1-9][0-9]* samples' -or
         $missing -notmatch 'missing required main ROM' -or $short -notmatch 'must be 32768 bytes') {
         throw 'Machine startup/negative tests failed; inspect the output files.'
     }
@@ -157,6 +168,12 @@ try {
     }
     if ($JoystickMode -and $output -notmatch 'PC-88 joystick mode selected') {
         throw 'Joystick mode was not selected; inspect MACHINE.OUT.'
+    }
+    if (($SoundTest -or $Sound44kTest) -and $output -notmatch 'DMA count=(?!3FFF)[0-9A-F]{4}; IRQs=[1-9][0-9]*') {
+        throw 'Sound Blaster DMA did not advance and service an IRQ; inspect MACHINE.OUT.'
+    }
+    if ($Sound44kTest -and $output -notmatch 'Sound Blaster PCM at .* 43478 Hz mono') {
+        throw 'High-rate DSP mode did not select 43,478 Hz; inspect MACHINE.OUT.'
     }
     if ($VgaTest -and ($output -notmatch 'VGA plane readback: PASS' -or
                        $output -notmatch 'original video mode restored: PASS')) {

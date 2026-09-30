@@ -18,6 +18,7 @@
 int dos_vga;
 int dos_key_log;
 int dos_mouse_log;
+extern int use_sound;
 static int frame_limit = 3;
 static int check_fixture;
 static int check_video;
@@ -25,6 +26,10 @@ static int check_disk;
 static int check_state;
 static int check_snapshot;
 static int check_config;
+static int dos_no_sound;
+int dos_pcm_zero;
+int dos_sb_filter;
+int dos_sb_44k;
 static const T_CONFIG_TABLE options[] = {
     {300, "dosframes", X_INT, &frame_limit, 0, 36000, NULL, NULL},
     {301, "doscheck", X_FIX, &check_fixture, TRUE, 0, NULL, NULL},
@@ -36,17 +41,25 @@ static const T_CONFIG_TABLE options[] = {
     {307, "dosstatechk", X_FIX, &check_state, TRUE, 0, NULL, NULL},
     {308, "dossnapchk", X_FIX, &check_snapshot, TRUE, 0, NULL, NULL},
     {309, "doscfgchk", X_FIX, &check_config, TRUE, 0, NULL, NULL},
+    {310, "dosnosound", X_FIX, &dos_no_sound, TRUE, 0, NULL, NULL},
+    {311, "dospcmzero", X_FIX, &dos_pcm_zero, TRUE, 0, NULL, NULL},
+    {312, "dossbfilter", X_FIX, &dos_sb_filter, TRUE, 0, NULL, NULL},
+    {313, "dossb44k", X_FIX, &dos_sb_44k, TRUE, 0, NULL, NULL},
     {0, NULL, X_INV, NULL, 0, 0, NULL, NULL}
 };
 
 static void help(FILE *fp)
 {
-    fputs("  DOS: no sound; frame pacing enabled; default is headless.\n"
+    fputs("  DOS: Sound Blaster-compatible audio is optional; frame pacing enabled.\n"
           "  -dosframes <0..36000>  Frame limit (default 3); 0 runs until quit.\n"
           "  -dosvga               VGA 640x480, 16-color approximated palette.\n"
           "  -dosvideochk          Verify VGA planes before restoring text mode.\n"
           "  -doskeylog            Log BIOS keyboard scan/ASCII codes to KEYS.LOG.\n"
           "  -dosmouselog          Log INT 33h availability and state to MOUSE.LOG.\n"
+          "  -dosnosound           Disable emulated sound output.\n"
+          "  -dospcmzero           Keep Sound Blaster active, but send digital silence.\n"
+          "  -dossbfilter          Apply a gentle high-frequency audio roll-off.\n"
+          "  -dossb44k             Test 43,478 Hz 8-bit mono DSP playback.\n"
           "  Ctrl+Q / Ctrl+Alt+Q    Emergency quit to DOS.\n"
           "  -dosdiskchk           Test mounted drive 1 (test image is modified).\n"
           "  -dosstatechk          Save/load emulator state (requires -doscheck).\n"
@@ -164,8 +177,9 @@ int main(int argc, char **argv)
     int frames = 0, status, fixture_ok = TRUE, video_ok = TRUE, disk_ok = TRUE;
     int state_ok = TRUE, snapshot_ok = TRUE, config_ok = TRUE;
     unsigned long loops = 0;
-    puts("QUASI88 DOS (no sound)");
+    puts("QUASI88 DOS (Sound Blaster-compatible audio)");
     if (!config_init(argc, argv, options, help, NULL)) return 1;
+    if (dos_no_sound) use_sound = FALSE;
     quasi88_atexit(config_exit);
     if (check_video && !dos_vga) { puts("DOS: -dosvideochk requires -dosvga"); config_exit(); return 1; }
     if (check_state && !check_fixture) { puts("DOS: -dosstatechk requires -doscheck"); config_exit(); return 1; }

@@ -445,6 +445,74 @@ set CD/line to `00h`, so it was removed; `/SB` now only logs the SB Pro
 mixer. For Windows 98 MS-DOS mode, `WSSTEST /SB` can be added to
 `C:\WINDOWS\DOSSTART.BAT`.
 
+### WSS output in QUASI88 (`-doswss`)
+
+`audio.c` has three output modes that share the ring buffer, rate control,
+resync, DMA start check, statistics, and exit cleanup:
+- SB 8-bit
+- SB16 16-bit on high DMA
+- WSS 16-bit
+
+WSS moves each 16-bit sample as two bytes on an 8-bit DMA channel. The ring
+position is therefore the byte position divided by two. The IRQ handler
+acknowledges WSS by writing the codec status register and SB by reading the
+DSP acknowledge port.
+
+`-doswss` enables WSS. It is opt-in because the AZT2320 mode switch is a
+vendor DSP command. Settings:
+
+- `Q88WSS` (`A` codec port, `I` IRQ, `D` 8-bit DMA) overrides the defaults.
+  Otherwise IRQ and DMA come from `BLASTER`, or default to 5 and 1.
+- The codec is probed at 534h first, the AZT2320 location, then at the
+  other candidates.
+- If no codec answers and an SB DSP is present, `09h, 00h` is sent and the
+  codec probed again. If it still does not answer, the switch is undone with
+  `09h, 01h` and a DSP reset.
+
+When WSS starts:
+
+- MODE2 is cleared. Format I8 is `47h` (22,050 Hz), or `4Bh` (44,100 Hz)
+  with `-dossb44k`. I9 is set to ACAL and SDC, and calibration must finish.
+- Aux inputs I2-I5 are muted (`8Ch`): they carry the SB DSP and FM output,
+  which WSS does not use. The DAC (I6/I7) is set to 0 dB (`00h`).
+- The playback count is set to one IRQ per ring pass. IEN and then PEN are
+  enabled, and the DMA start check must pass.
+
+On exit, or if WSS start fails, I2-I5 are set to `0Ch` and I6/I7 to `08h`
+(the F8 values), then `09h, 01h` and a DSP reset return the card to Sound
+Blaster mode. A failed WSS start falls back to SB16 or SB 8-bit output.
+
+The target DMA lead is now a fixed 8,192 samples in every mode. For SB16 it
+was a quarter ring (4,096 samples). On the physical AZT2320 the lead once
+dipped about 5,000 samples below target, which a 4,096-sample target would
+not absorb.
+
+2026-09-30 validation:
+
+- The Machine build has no new warnings.
+- 12,000 cycles: `-SoundTest`, `-Sound44kTest`, `-Sound8Test`, and the new
+  `-WssFallbackTest` pass. The last sets `-doswss` and requires
+  `no WSS codec found; using Sound Blaster output`, then SB16.
+- Ys I, 1,500 frames, `core=dynamic`, maximum cycles: at 99.4% of real time,
+  SB16 had 0 underruns and 0 resyncs (minimum lead 4,061 samples). A second
+  run on a busier host reached only 79-97% of real time and had underrun
+  resyncs, as expected below real time.
+- DOSBox-X cannot exercise WSS playback.
+
+Physical AZT2320 result, user-reported, F8 boot, `YS1WSS.BAT`: both runs
+found the codec at 534h (I12 `CAh`, I25 `80h`) and played 16-bit mono.
+
+| Run | Length | Card rate | Resyncs | Emulation | Rate scale | Min. lead |
+|---|---|---|---|---|---|---|
+| 1 | 19.6 s | 22,053 Hz | 0 | 99.6% | up to 1.0151 | 4,562 |
+| 2 | 75.7 s | 22,048 Hz | 0 | 99.6% | 0.9998 to 1.0377 | 357 |
+
+The codec's crystal-derived rate is close to nominal. In SB mode the same
+card played at 22,787 Hz. `YS1HW` afterwards had Sound Blaster sound, so the
+return to SB mode works. The user reports a huge improvement over 8-bit and
+much less hiss. They also heard a slight pop, like a plosive into a
+microphone, at the opening.
+
 #### DOSBox-X dynamic core: use `core=normal`
 
 With `core=dynamic` or `core=auto`, DOSBox-X 2026.08.31 gives wrong

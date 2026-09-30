@@ -12,7 +12,8 @@ param(
     [switch]$JoystickMode,
     [switch]$SoundTest,
     [switch]$Sound44kTest,
-    [switch]$Sound8Test
+    [switch]$Sound8Test,
+    [switch]$WssFallbackTest
 )
 $ErrorActionPreference = 'Stop'
 if ($Mk2srDirectory -and -not $RomDirectory) { throw '-Mk2srDirectory requires the base -RomDirectory.' }
@@ -20,7 +21,7 @@ if ($DiskTest -and -not $RomDirectory) { throw '-DiskTest requires real ROMs via
 if ($StateTest -and $RomDirectory) { throw '-StateTest currently uses the synthetic CPU marker ROMs; omit -RomDirectory.' }
 if ($SnapshotTest -and $RomDirectory) { throw '-SnapshotTest currently uses the synthetic CPU marker ROMs; omit -RomDirectory.' }
 if ($ConfigTest -and $RomDirectory) { throw '-ConfigTest currently uses the synthetic CPU marker ROMs; omit -RomDirectory.' }
-$anySoundTest = $SoundTest -or $Sound44kTest -or $Sound8Test
+$anySoundTest = $SoundTest -or $Sound44kTest -or $Sound8Test -or $WssFallbackTest
 if ($anySoundTest -and (-not $RomDirectory -or $Frames -lt 60)) { throw 'Sound tests require real ROMs and at least 60 frames.' }
 if (-not $DosBoxX) { $DosBoxX = (Get-Command dosbox-x.exe -ErrorAction Stop).Source }
 $DosBoxX = (Resolve-Path -LiteralPath $DosBoxX).Path
@@ -40,7 +41,7 @@ foreach ($name in @('ROM', 'EMPTY', 'SHORT')) {
 }
 [IO.File]::WriteAllBytes((Join-Path $testDir 'SHORT\N88.ROM'), [byte[]]@(0))
 $configSaveOption = ''
-$soundRateOption = @($(if ($Sound44kTest) { '-dossb44k' }), $(if ($Sound8Test) { '-dossb8' })) -join ' '
+$soundRateOption = @($(if ($Sound44kTest) { '-dossb44k' }), $(if ($Sound8Test) { '-dossb8' }), $(if ($WssFallbackTest) { '-doswss' })) -join ' '
 if ($RomDirectory) {
     $RomDirectory = (Resolve-Path -LiteralPath $RomDirectory).Path
     # Copy only ROM files. Originals and all disk images remain outside the mount.
@@ -174,6 +175,10 @@ try {
     }
     if ($anySoundTest -and $output -notmatch 'DMA count=(?!3FFF)[0-9A-F]{4}; IRQs=[1-9][0-9]*') {
         throw 'Sound Blaster DMA did not advance and service an IRQ; inspect MACHINE.OUT.'
+    }
+    # DOSBox-X has no WSS codec: -doswss must fall back to the SB16 path.
+    if ($WssFallbackTest -and $output -notmatch 'no WSS codec found; using Sound Blaster output') {
+        throw 'WSS fallback message missing; inspect MACHINE.OUT.'
     }
     # The test configuration emulates an SB16 (DSP 4.xx, HDMA 5): 16-bit
     # output is the default and -dossb8 forces the 8-bit DSP path.

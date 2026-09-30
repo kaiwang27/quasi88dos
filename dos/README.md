@@ -5,6 +5,11 @@ An MS-DOS port of [QUASI88](../README.md), the PC-8801 emulator. It is a
 which is embedded in the executable. It runs on real MS-DOS hardware and in
 DOSBox-X.
 
+This repository is a fork of [bubio/QUASI88](https://github.com/bubio/QUASI88),
+the SDL2 port of QUASI88. The DOS port lives in `dos/`, `src/sysdepend/dos/`,
+and `src/osdepend/dos/`; the emulation core and the desktop build are
+unchanged from upstream commit `c5f959a` (2026-06-19).
+
 - PC-8801 emulation core, unchanged from the desktop port: Z80 main and sub
   CPUs, disk (D88 images), save states, screenshots, menus.
 - Display: VGA 640x480 with the PC-8801's own palette, or an optional VESA

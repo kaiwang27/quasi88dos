@@ -6,6 +6,8 @@
 
 QUASI88 is a powerful and highly compatible PC-8801 emulator, originally created by Shozo Fukunaga. This version is a multi-platform port based on SDL2, providing a modern experience across macOS, Windows, and Linux.
 
+> **This repository is a fork of [bubio/QUASI88](https://github.com/bubio/QUASI88) that adds an MS-DOS port.** The DOS port is documented in [dos/README.md](dos/README.md). The desktop (SDL2) code is unchanged from upstream, and the badges, release downloads, and clone URL below refer to the upstream project, which does not include the DOS build.
+
 <p align="center">
   <a href="https://github.com/bubio/QUASI88/releases/latest">
     <img src="https://img.shields.io/github/v/release/bubio/QUASI88" alt="Latest Release">

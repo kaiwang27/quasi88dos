@@ -1,8 +1,9 @@
 /* DMA audio output for the DOS target. Sound Blaster-compatible cards play
-   16-bit on an SB16 (DSP 4.xx), otherwise 8-bit. With -doswss, a Windows
-   Sound System (AD1848/CS4231-compatible) codec plays 16-bit PCM; an
-   Aztech AZT2320 is switched from Sound Blaster to WSS mode for this and
-   back on exit. */
+   16-bit on an SB16 (DSP 4.xx), otherwise 8-bit mono. With -doswss, a
+   Windows Sound System (AD1848/CS4231-compatible) codec plays 16-bit PCM;
+   an Aztech AZT2320 is switched from Sound Blaster to WSS mode for this and
+   back on exit. The 16-bit modes play stereo unless -dosmono is given or
+   the 64 KiB DMA ring cannot be allocated. */
 #include <conio.h>
 #include <dos.h>
 #include <i86.h>
@@ -13,7 +14,11 @@
 #include "getconf.h"
 #include "wait.h"
 
-#define SB_DMA_BYTES 32768U
+/* The DMA ring is 64 KiB (the most one 8-bit DMA transfer can address),
+   or 32 KiB when conventional memory is short; stereo needs the larger
+   ring to keep the target lead. */
+#define SB_DMA_BYTES_MAX 65536UL
+#define SB_DMA_BYTES_MIN 32768UL
 /* DSP command 40h uses an integer time constant. 211 gives 22,222 Hz;
    233 gives 43,478 Hz for an optional high-rate mono comparison. */
 #define SB_RATE_22K 22222U
@@ -31,10 +36,10 @@
 #define SB_RATE_ADJUST_MAX 0.05
 #define SB_RATE_ERROR_SMOOTH 16.0
 #define SB_DMA_START_CHECK_MS 200
-/* Samples kept queued: 0.37 s at 22 kHz. The physical AZT2320 run dipped
-   about 5,000 samples below target, so a smaller lead would underrun. The
-   8-bit ring holds 32,768 samples and the 16-bit rings 16,384, which leaves
-   room above the target to tell a late writer from an early one. */
+/* Frames kept queued: 0.37 s at 22 kHz. The physical AZT2320 run dipped
+   about 5,000 frames below target, so a smaller lead would underrun. Every
+   ring holds at least 16,384 frames, which leaves room above the target to
+   tell a late writer from an early one. */
 #define SB_TARGET_LEAD 8192U
 
 /* WSS codec direct registers (relative to the codec base) and indexed
@@ -57,7 +62,8 @@
 #define WSS_I_UPPER_COUNT 14
 #define WSS_I_LOWER_COUNT 15
 #define WSS_I_VERSION 25
-#define WSS_FORMAT_16BIT_MONO 0x40
+#define WSS_FORMAT_16BIT 0x40
+#define WSS_FORMAT_STEREO 0x10
 #define WSS_RATE_22050 0x07        /* XTAL2 (16.9344 MHz) / 768 */
 #define WSS_RATE_44100 0x0b        /* XTAL2 / 384 */
 #define WSS_IFACE_PEN 0x01
@@ -85,6 +91,7 @@ extern int dos_sb_filter;
 extern int dos_sb_44k;
 extern int dos_sb_8bit;
 extern int dos_wss;
+extern int dos_mono;
 
 static const unsigned wss_candidates[] = {
     0x534, 0x530, 0x608, 0x604, 0xe84, 0xe80, 0xf44, 0xf40
@@ -99,12 +106,16 @@ static unsigned sb_dsp_major, sb_dsp_minor;
 static unsigned wss_base;             /* 0 when no codec is in use */
 static unsigned wss_irq, wss_dma;
 static int out_mode;
+static unsigned out_channels;         /* 1 = mono, 2 = interleaved stereo */
+static int force_mono;                /* set when WSS stereo setup failed */
+static unsigned long sb_ring_bytes;   /* SB_DMA_BYTES_MAX or _MIN */
 /* Read by the IRQ handler: the active IRQ line, the DSP acknowledge port
    (0Eh for 8-bit, 0Fh for 16-bit), and the WSS status port (0 for SB). */
 static unsigned out_irq;
 static unsigned sb_ack_port;
 static unsigned wss_status_port;
-/* Ring positions below count samples; 16-bit samples use two bytes. */
+/* Ring positions below count frames: one sample per channel, one or two
+   bytes each. */
 static unsigned sb_ring_samples;
 static unsigned sb_dma_selector;
 static unsigned sb_dma_segment;
@@ -115,6 +126,7 @@ static unsigned long pcm_samples_total;
 static unsigned long pcm_samples_non_silent;
 static unsigned long pcm_dma_samples_non_silent;
 static unsigned long pcm_clipped_samples;
+static unsigned long pcm_lr_differ_frames;  /* core frames with left != right */
 static unsigned long pcm_peak;
 static volatile unsigned long pcm_irq_count;
 static unsigned pcm_min_dma_lead;
@@ -144,6 +156,7 @@ static long filter_state_1_q4;
 static long filter_state_2_q4;
 
 static int out_16bit(void) { return out_mode != OUT_SB8; }
+static unsigned frame_bytes(void) { return (out_16bit() ? 2U : 1U) * out_channels; }
 
 static unsigned sb_rate(void)
 {
@@ -290,7 +303,7 @@ static unsigned dma_count_port(void)
    16-bit one. WSS moves each 16-bit sample as two bytes. */
 static unsigned dma_ring_units(void)
 {
-    return dma_16bit_controller() ? SB_DMA_BYTES / 2 : SB_DMA_BYTES;
+    return (unsigned)(dma_16bit_controller() ? sb_ring_bytes / 2 : sb_ring_bytes);
 }
 
 static int sb_wait_write(void)
@@ -464,47 +477,67 @@ static void wss_leave(void)
     wss_status_port = 0;
 }
 
-/* Set 16-bit mono at the output rate with single-channel DMA, then wait for
+/* Set 16-bit mono or stereo at the output rate with single-channel DMA, then wait for
    the autocalibration that follows a mode change. MODE2 is cleared so the
    AD1848-compatible register set (I14/I15 playback count) applies. */
 static int wss_configure(void)
 {
     union wait_time start;
-    unsigned char format = (unsigned char)(WSS_FORMAT_16BIT_MONO |
+    unsigned char format = (unsigned char)(WSS_FORMAT_16BIT |
+        (out_channels == 2 ? WSS_FORMAT_STEREO : 0) |
         (dos_sb_44k ? WSS_RATE_44100 : WSS_RATE_22050));
     unsigned i;
     wss_out(WSS_I_MODE_ID, (unsigned char)(wss_in(WSS_I_MODE_ID) & ~WSS_MODE2));
     wss_out(WSS_I_IFACE, (unsigned char)(wss_in(WSS_I_IFACE) & ~WSS_IFACE_PEN));
     outp(wss_base + WSS_INDEX, WSS_INDEX_MCE | WSS_I_FORMAT);
     outp(wss_base + WSS_DATA, format);
-    if (!wss_ready(wss_base)) return FALSE;
+    if (!wss_ready(wss_base)) {
+        printf("DOS: WSS codec stayed busy after format %02X\n", format);
+        return FALSE;
+    }
     outp(wss_base + WSS_INDEX, WSS_INDEX_MCE | WSS_I_IFACE);
     outp(wss_base + WSS_DATA, WSS_IFACE_ACAL | WSS_IFACE_SDC);
     outp(wss_base + WSS_INDEX, WSS_I_IFACE);   /* leave mode change */
-    if (!wss_ready(wss_base)) return FALSE;
+    if (!wss_ready(wss_base)) {
+        printf("DOS: WSS codec stayed busy after leaving mode change (format %02X)\n",
+               format);
+        return FALSE;
+    }
     pause_ms(2);                               /* let ACI rise before polling */
     wait_get_current_time(&start);
     while (wss_in(WSS_I_TEST_INIT) & WSS_TEST_ACI)
-        if (wait_calc_elasped_time_ms(&start) > WSS_CALIBRATION_MS) return FALSE;
+        if (wait_calc_elasped_time_ms(&start) > WSS_CALIBRATION_MS) {
+            printf("DOS: WSS codec calibration timed out (format %02X, I9 %02X, I11 %02X)\n",
+                   format, wss_in(WSS_I_IFACE), wss_in(WSS_I_TEST_INIT));
+            return FALSE;
+        }
     for (i = WSS_I_AUX1_LEFT; i <= WSS_I_AUX2_RIGHT; ++i)
         wss_out(i, (unsigned char)(WSS_AUX_POWER_ON | WSS_AUX_MUTE));
     wss_out(WSS_I_LEFT_DAC, WSS_DAC_PLAY);
     wss_out(WSS_I_RIGHT_DAC, WSS_DAC_PLAY);
-    return wss_in(WSS_I_FORMAT) == format;
+    if (wss_in(WSS_I_FORMAT) != format) {
+        printf("DOS: WSS codec format wrote %02X, read %02X (I9 %02X, I11 %02X, I12 %02X)\n",
+               format, wss_in(WSS_I_FORMAT), wss_in(WSS_I_IFACE),
+               wss_in(WSS_I_TEST_INIT), wss_in(WSS_I_MODE_ID));
+        return FALSE;
+    }
+    return TRUE;
 }
 
 /* ---- DMA buffer and output start/stop ---- */
 
-static int allocate_dma_buffer(void)
+static int allocate_dma_buffer(unsigned long bytes)
 {
     union REGS regs;
     unsigned physical, remainder;
     memset(&regs, 0, sizeof(regs));
     regs.x.eax = 0x0100;             /* DPMI allocate DOS memory block */
-    /* Up to 64 KiB is needed to align the DMA window without crossing a page. */
-    regs.x.ebx = (SB_DMA_BYTES + 65535U + 15U) >> 4;
+    /* Up to 64 KiB extra aligns the ring to a 64 KiB boundary, so it never
+       crosses an 8-bit (64 KiB) or 16-bit (128 KiB) DMA page. */
+    regs.x.ebx = (unsigned)((bytes + 65535UL + 15UL) >> 4);
     int386(0x31, &regs, &regs);
     if (regs.x.cflag) return FALSE;
+    sb_ring_bytes = bytes;
     sb_dma_segment = regs.w.ax;
     sb_dma_selector = regs.w.dx;
     physical = (sb_dma_segment << 4) & 0xffffU;
@@ -535,6 +568,8 @@ static void start_dma(void)
     /* The 16-bit controller takes a word address; bit 0 of its page is
        ignored. The buffer is 64 KiB aligned, so it cannot cross a page. */
     unsigned address = dma_16bit_controller() ? physical >> 1 : physical;
+    /* DMA and SB DSP lengths count bytes or 16-bit words (both channels);
+       the WSS codec counts frames. */
     unsigned last = dma_ring_units() - 1;
     unsigned samples_last = sb_ring_samples - 1;
     outp(dma_mask_port(), 0x04 | channel);   /* mask DMA channel */
@@ -560,8 +595,9 @@ static void start_dma(void)
             !sb_write((unsigned char)(rate >> 8)) ||
             !sb_write((unsigned char)(rate & 0xff))) return;
         outp(dma_mask_port(), channel);      /* enable DMA before DRQ */
-        /* B6h: 16-bit output, auto-init, FIFO; mode 10h: signed mono. */
-        if (!sb_write(0xb6) || !sb_write(0x10) ||
+        /* B6h: 16-bit output, auto-init, FIFO; mode 10h signed mono or
+           30h signed stereo. */
+        if (!sb_write(0xb6) || !sb_write(out_channels == 2 ? 0x30 : 0x10) ||
             !sb_write(last & 0xff) || !sb_write(last >> 8)) return;
     } else {
         if (!sb_write(0x40) || !sb_write((unsigned char)sb_time_constant()) ||
@@ -594,11 +630,12 @@ static const char *out_name(void)
     return out_mode == OUT_SB16 ? "Sound Blaster 16-bit" : "Sound Blaster 8-bit";
 }
 
+/* The playback cursor in frames. */
 static unsigned read_dma_position(void)
 {
     unsigned units = dma_ring_units();
     unsigned pos = (units - read_dma_count() - 1U) & (units - 1U);
-    return out_mode == OUT_WSS ? pos / 2U : pos;
+    return pos * (dma_16bit_controller() ? 2U : 1U) / frame_bytes();
 }
 
 /* A card can answer its setup without its DMA transfer running, e.g. a Plug
@@ -622,22 +659,22 @@ static int sb_dma_started(void)
    SB DSP reset), leaving the IRQ handler and buffer for another attempt. */
 static int start_output(void)
 {
-    unsigned i;
+    unsigned long i;
     sb_ack_port = sb_base + (out_mode == OUT_SB16 ? 0x0f : 0x0e);
     wss_status_port = out_mode == OUT_WSS ? wss_base + WSS_STATUS : 0;
-    sb_ring_samples = out_16bit() ? SB_DMA_BYTES / 2 : SB_DMA_BYTES;
+    /* Stereo needs 16-bit output and the 64 KiB ring for the target lead. */
+    out_channels = (out_16bit() && !dos_mono && !force_mono &&
+                    sb_ring_bytes == SB_DMA_BYTES_MAX) ? 2U : 1U;
+    sb_ring_samples = (unsigned)(sb_ring_bytes / frame_bytes());
     /* Unsigned 8-bit silence is 80h; signed 16-bit silence is 0000h. */
-    for (i = 0; i < SB_DMA_BYTES; ++i) sb_dma_buffer[i] = out_16bit() ? 0 : 0x80;
+    for (i = 0; i < sb_ring_bytes; ++i) sb_dma_buffer[i] = out_16bit() ? 0 : 0x80;
     sb_target_lead = SB_TARGET_LEAD;
     sb_write_pos = sb_target_lead;
     sb_written_abs = sb_target_lead;
     sb_consumed_abs = 0;
     sb_last_dma_pos = 0;
     pcm_irq_count = 0;
-    if (out_mode == OUT_WSS && !wss_configure()) {
-        puts("DOS: WSS codec did not finish calibration");
-        return FALSE;
-    }
+    if (out_mode == OUT_WSS && !wss_configure()) return FALSE;
     start_dma();
     if (sb_active && sb_dma_started()) return TRUE;
     sb_active = FALSE;
@@ -706,6 +743,8 @@ int osd_start_audio_stream(int stereo)
     unsigned physical;
     (void)stereo;
     out_mode = OUT_SB8;
+    out_channels = 1;
+    force_mono = FALSE;
     source_phase = 0.0;
     filter_state_1_q4 = 0;
     filter_state_2_q4 = 0;
@@ -713,9 +752,10 @@ int osd_start_audio_stream(int stereo)
     pcm_samples_non_silent = 0;
     pcm_dma_samples_non_silent = 0;
     pcm_clipped_samples = 0;
+    pcm_lr_differ_frames = 0;
     pcm_peak = 0;
     pcm_irq_count = 0;
-    pcm_min_dma_lead = SB_DMA_BYTES;
+    pcm_min_dma_lead = 0xffffU;
     pcm_low_dma_lead_frames = 0;
     pcm_dma_underrun_frames = 0;
     pcm_frames = 0;
@@ -745,13 +785,13 @@ int osd_start_audio_stream(int stereo)
     }
     if (dos_wss) wss_detect();
     if (!sb_dsp_present && !wss_base) goto no_device;
-    if (!allocate_dma_buffer()) {
+    if (!allocate_dma_buffer(SB_DMA_BYTES_MAX) && !allocate_dma_buffer(SB_DMA_BYTES_MIN)) {
         wss_leave();
         goto no_device;
     }
 
     physical = (sb_dma_segment << 4) + sb_dma_offset;
-    if ((physical & 0xffffU) + SB_DMA_BYTES > 0x10000UL) {
+    if ((physical & 0xffffU) + sb_ring_bytes > 0x10000UL) {
         free_dma_buffer();
         wss_leave();
         goto no_device;
@@ -760,7 +800,13 @@ int osd_start_audio_stream(int stereo)
     if (wss_base) {
         out_mode = OUT_WSS;
         out_irq = wss_irq;
-        if (!install_sb_irq() || !start_output()) {
+        if (install_sb_irq() && !start_output() && out_channels == 2) {
+            /* Keep 16-bit output if only the stereo setup failed. */
+            puts("DOS: WSS stereo did not start; retrying WSS in mono");
+            force_mono = TRUE;
+            (void)start_output();
+        }
+        if (!sb_active) {
             puts("DOS: WSS output did not start; returning to Sound Blaster output");
             remove_sb_irq();
             wss_leave();
@@ -799,12 +845,16 @@ int osd_start_audio_stream(int stereo)
     source_samples = next_frame_samples();
     if (!sb_atexit_registered) sb_atexit_registered = atexit(sb_exit_cleanup) == 0;
     if (out_mode == OUT_WSS)
-        printf("DOS: WSS codec PCM at %03X IRQ %u DMA %u, %u Hz 16-bit mono\n",
-               wss_base, out_irq, dma_channel(), sb_rate());
+        printf("DOS: WSS codec PCM at %03X IRQ %u DMA %u, %u Hz 16-bit %s\n",
+               wss_base, out_irq, dma_channel(), sb_rate(),
+               out_channels == 2 ? "stereo" : "mono");
     else
-        printf("DOS: Sound Blaster DSP %u.%02u PCM at %03X IRQ %u DMA %u, %u Hz %s mono\n",
+        printf("DOS: Sound Blaster DSP %u.%02u PCM at %03X IRQ %u DMA %u, %u Hz %s %s\n",
                sb_dsp_major, sb_dsp_minor, sb_base, out_irq, dma_channel(),
-               sb_rate(), out_16bit() ? "16-bit" : "8-bit");
+               sb_rate(), out_16bit() ? "16-bit" : "8-bit",
+               out_channels == 2 ? "stereo" : "mono");
+    printf("DOS: audio ring %lu KiB, %u frames, target lead %u frames\n",
+           sb_ring_bytes / 1024UL, sb_ring_samples, sb_target_lead);
     wait_get_current_time(&sb_start_time);
     return (int)source_samples;
 
@@ -822,14 +872,10 @@ no_device:
    crackling. */
 static void sb_resync(unsigned dma_pos)
 {
-    unsigned i, pos = dma_pos;
+    unsigned i, j, pos = dma_pos, bytes = frame_bytes();
     for (i = 0; i < sb_target_lead; ++i) {
-        if (out_16bit()) {
-            sb_dma_buffer[pos * 2U] = 0;
-            sb_dma_buffer[pos * 2U + 1U] = 0;
-        } else {
-            sb_dma_buffer[pos] = 0x80;
-        }
+        for (j = 0; j < bytes; ++j)
+            sb_dma_buffer[(unsigned long)pos * bytes + j] = out_16bit() ? 0 : 0x80;
         pos = (pos + 1) & (sb_ring_samples - 1U);
     }
     sb_write_pos = pos;
@@ -875,44 +921,57 @@ int osd_update_audio_stream(INT16 *buffer)
     if (sb_rate_scale < sb_rate_scale_min) sb_rate_scale_min = sb_rate_scale;
     if (sb_rate_scale > sb_rate_scale_max) sb_rate_scale_max = sb_rate_scale;
     for (i = 0; i < source_samples; ++i) {
-        int mono = (((int)buffer[i * 2] + (int)buffer[i * 2 + 1]) / 2) * SB_GAIN;
-        unsigned magnitude;
-        unsigned char sample;
-        if (mono > 32767) {
-            mono = 32767;
-            ++pcm_clipped_samples;
-        } else if (mono < -32768) {
-            mono = -32768;
-            ++pcm_clipped_samples;
+        int left = (int)buffer[i * 2] * SB_GAIN;
+        int right = (int)buffer[i * 2 + 1] * SB_GAIN;
+        unsigned long offset = (unsigned long)sb_write_pos * frame_bytes();
+        unsigned channel;
+        if (out_channels == 1) {
+            /* The downmix averages the channels, so a centered sound keeps
+               the same level in mono and stereo. */
+            left = (((int)buffer[i * 2] + (int)buffer[i * 2 + 1]) / 2) * SB_GAIN;
+            if (dos_sb_filter) {
+                /* Two fixed-point one-pole stages roll off high-frequency
+                   hiss before reducing the signal to 8-bit PCM. */
+                long input_q4 = (long)(left < -32768 ? -32768 : left > 32767 ? 32767 : left) * 16;
+                filter_state_1_q4 += ((input_q4 - filter_state_1_q4) * 230) / 256;
+                filter_state_2_q4 += ((filter_state_1_q4 - filter_state_2_q4) * 230) / 256;
+                left = (int)(filter_state_2_q4 / 16);
+            }
         }
-        if (dos_sb_filter) {
-            /* Two fixed-point one-pole stages roll off high-frequency hiss
-               before reducing the signal to the Sound Blaster's 8-bit PCM. */
-            long input_q4 = (long)mono * 16;
-            filter_state_1_q4 += ((input_q4 - filter_state_1_q4) * 230) / 256;
-            filter_state_2_q4 += ((filter_state_1_q4 - filter_state_2_q4) * 230) / 256;
-            mono = (int)(filter_state_2_q4 / 16);
-        }
-        magnitude = (unsigned)(mono < 0 ? -mono : mono);
-        if (magnitude > pcm_peak) pcm_peak = magnitude;
         ++pcm_samples_total;
-        if (mono != 0) ++pcm_samples_non_silent;
-        if (dos_pcm_zero) mono = 0;
-        if (out_16bit()) {
-            /* Signed little-endian 16-bit PCM keeps the core's resolution. */
-            unsigned offset = sb_write_pos * 2U;
-            if (mono != 0) ++pcm_dma_samples_non_silent;
-            sb_dma_buffer[offset] = (unsigned char)(mono & 0xff);
-            sb_dma_buffer[offset + 1] = (unsigned char)((mono >> 8) & 0xff);
-        } else {
-            /* Round to the nearest 8-bit step. Truncating with a plain shift
-               floors every small negative value to -1 LSB, turning a quiet
-               or decaying tone into a lingering half-wave buzz. */
-            int rounded = (mono + 128) >> 8;
-            if (rounded > 127) rounded = 127;
-            sample = (unsigned char)(rounded + 128);
-            if (sample != 128) ++pcm_dma_samples_non_silent;
-            sb_dma_buffer[sb_write_pos] = sample;
+        if (buffer[i * 2] != 0 || buffer[i * 2 + 1] != 0) ++pcm_samples_non_silent;
+        if (buffer[i * 2] != buffer[i * 2 + 1]) ++pcm_lr_differ_frames;
+        for (channel = 0; channel < out_channels; ++channel) {
+            int value = channel ? right : left;
+            unsigned magnitude;
+            if (value > 32767) {
+                value = 32767;
+                ++pcm_clipped_samples;
+            } else if (value < -32768) {
+                value = -32768;
+                ++pcm_clipped_samples;
+            }
+            magnitude = (unsigned)(value < 0 ? -value : value);
+            if (magnitude > pcm_peak) pcm_peak = magnitude;
+            if (dos_pcm_zero) value = 0;
+            if (out_16bit()) {
+                /* Signed little-endian 16-bit PCM keeps the core's resolution. */
+                if (value != 0) ++pcm_dma_samples_non_silent;
+                sb_dma_buffer[offset] = (unsigned char)(value & 0xff);
+                sb_dma_buffer[offset + 1] = (unsigned char)((value >> 8) & 0xff);
+                offset += 2;
+            } else {
+                /* Round to the nearest 8-bit step. Truncating with a plain
+                   shift floors every small negative value to -1 LSB, turning
+                   a quiet or decaying tone into a lingering half-wave buzz. */
+                int rounded = (value + 128) >> 8;
+                unsigned char sample;
+                if (rounded > 127) rounded = 127;
+                sample = (unsigned char)(rounded + 128);
+                if (sample != 128) ++pcm_dma_samples_non_silent;
+                sb_dma_buffer[offset] = sample;
+                offset += 1;
+            }
         }
         sb_write_pos = (sb_write_pos + 1) & (sb_ring_samples - 1);
     }
@@ -925,9 +984,9 @@ void osd_stop_audio_stream(void)
 {
     unsigned dma_count = sb_active ? read_dma_count() : 0xffffU;
     if (sb_active) {
-        printf("DOS: audio PCM input: %lu samples, %lu non-silent; output peak=%lu; clipped=%lu; DMA non-center=%lu; DMA count=%04X; IRQs=%lu; minimum DMA lead=%u samples; low-lead frames=%lu; underrun frames=%lu\n",
+        printf("DOS: audio PCM input: %lu samples, %lu non-silent; output peak=%lu; clipped=%lu; L/R differ=%lu; DMA non-center=%lu; DMA count=%04X; IRQs=%lu; minimum DMA lead=%u samples; low-lead frames=%lu; underrun frames=%lu\n",
                pcm_samples_total, pcm_samples_non_silent, pcm_peak,
-               pcm_clipped_samples,
+               pcm_clipped_samples, pcm_lr_differ_frames,
                pcm_dma_samples_non_silent, dma_count, pcm_irq_count,
                pcm_min_dma_lead, pcm_low_dma_lead_frames,
                pcm_dma_underrun_frames);

@@ -517,6 +517,62 @@ output chain. The user considers it normal for their setup, and it is left
 unchanged. The DAC plays at 0 dB, 12 dB above the power-on level, which
 could be lowered if needed.
 
+### 16-bit stereo
+
+The WSS and SB16 modes now play 16-bit stereo; SB 8-bit stays mono. The
+core already renders interleaved left/right. On OPNA machines, the
+YM2608's FM left and right outputs go to separate speakers, while SSG,
+beep, and PCG go to both. Details:
+
+- **DMA ring:** 64 KiB. One 8-bit DMA transfer can address at most 64 KiB,
+  and a 64 KiB-aligned block needs up to 128 KiB of DOS memory. If that
+  allocation fails, the 32 KiB ring and mono are used.
+- **Positions:** ring positions count frames of 1, 2, or 4 bytes. The WSS
+  codec count is in frames. SB16 DMA and DSP lengths are in 16-bit words
+  covering both channels.
+- **Hardware format:** WSS stereo sets I8 bit 4 (`57h` at 22,050 Hz). SB16
+  uses DSP mode `30h`.
+- **Level:** each channel gets the same x2 gain as the mono downmix of both
+  channels, so centered sounds keep their level.
+- **Options and logging:** `-dosmono` forces mono. The exit statistics add
+  `L/R differ`, the number of core frames whose left and right samples
+  differ.
+
+2026-09-30 validation:
+
+- The Machine build has no new warnings.
+- 12,000 cycles: `-SoundTest` and `-Sound44kTest` now expect SB16 `16-bit
+  stereo` and pass. `-Sound8Test` (8-bit mono) and `-WssFallbackTest` also
+  pass. DOSBox-X allocated the 64 KiB ring.
+- SB16 stereo: 16,384 frames, target lead 8,192 frames, one IRQ per 0.74 s
+  ring pass (18 IRQs in 13.9 s).
+- Ys I (OPNA, `-sd2`), 1,500 frames, `core=dynamic`, maximum cycles: the
+  stereo run was at 98.2% of real time with one underrun resync. The
+  `-dosmono` run was at 99.0% with none. Both reported `L/R differ=0`: the
+  opening routes everything to both channels, so this run did not exercise
+  panning.
+
+Physical AZT2320 results, user-reported:
+
+- The first stereo run failed with `WSS codec did not finish calibration`
+  and fell back to SB 8-bit mono. It ran after exiting Windows 98 without a
+  power cycle. That single message covered four failure points, so the
+  cause is unknown.
+- `wss_configure()` now reports which step failed:
+  - the codec stays busy after the format write;
+  - the codec stays busy after leaving mode change;
+  - calibration times out (with I9 and I11);
+  - the format reads back wrong (with I8, I9, I11, and I12).
+- A failed stereo setup now retries WSS in 16-bit mono before falling back
+  to Sound Blaster.
+- With that build, two runs played 16-bit stereo through the codec at
+  534h, 0 underruns and 0 resyncs:
+  - after an F8 boot: 61.0 s at 22,051 Hz, 99.5% of real time;
+  - after Windows 98 "Restart in MS-DOS mode": 41.0 s at 22,037 Hz, 99.2%
+    of real time, 1 resync.
+- Both runs reported `L/R differ=0`, because Ys I is centered. The
+  earlier stereo failure did not recur.
+
 #### DOSBox-X dynamic core: use `core=normal`
 
 With `core=dynamic` or `core=auto`, DOSBox-X 2026.08.31 gives wrong

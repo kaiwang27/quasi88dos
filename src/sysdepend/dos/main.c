@@ -32,6 +32,7 @@ int dos_sb_filter;
 int dos_sb_44k;
 int dos_sb_8bit;
 int dos_wss;
+int dos_mono;
 static const T_CONFIG_TABLE options[] = {
     {300, "dosframes", X_INT, &frame_limit, 0, 36000, NULL, NULL},
     {301, "doscheck", X_FIX, &check_fixture, TRUE, 0, NULL, NULL},
@@ -49,6 +50,7 @@ static const T_CONFIG_TABLE options[] = {
     {313, "dossb44k", X_FIX, &dos_sb_44k, TRUE, 0, NULL, NULL},
     {314, "dossb8", X_FIX, &dos_sb_8bit, TRUE, 0, NULL, NULL},
     {315, "doswss", X_FIX, &dos_wss, TRUE, 0, NULL, NULL},
+    {316, "dosmono", X_FIX, &dos_mono, TRUE, 0, NULL, NULL},
     {0, NULL, X_INV, NULL, 0, 0, NULL, NULL}
 };
 
@@ -66,6 +68,7 @@ static void help(FILE *fp)
           "  -dossb44k             Use 44,100 Hz (SB16) or 43,478 Hz (8-bit) output.\n"
           "  -dossb8               Force 8-bit DSP output even on an SB16.\n"
           "  -doswss               Use a WSS codec (AZT2320: switch from SB mode).\n"
+          "  -dosmono              Play mono even when 16-bit stereo is available.\n"
           "  Ctrl+Q / Ctrl+Alt+Q    Emergency quit to DOS.\n"
           "  -dosdiskchk           Test mounted drive 1 (test image is modified).\n"
           "  -dosstatechk          Save/load emulator state (requires -doscheck).\n"

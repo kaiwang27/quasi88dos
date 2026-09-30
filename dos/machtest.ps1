@@ -183,7 +183,7 @@ try {
     # The test configuration emulates an SB16 (DSP 4.xx, HDMA 5): 16-bit
     # output is the default and -dossb8 forces the 8-bit DSP path.
     $expectedFormat = if ($Sound8Test) { 'DMA 1, ' + $(if ($Sound44kTest) { '43478' } else { '22222' }) + ' Hz 8-bit mono' }
-                      else { 'DMA 5, ' + $(if ($Sound44kTest) { '44100' } else { '22050' }) + ' Hz 16-bit mono' }
+                      else { 'DMA 5, ' + $(if ($Sound44kTest) { '44100' } else { '22050' }) + ' Hz 16-bit stereo' }
     if ($anySoundTest -and $output -notmatch ('Sound Blaster DSP 4\.[0-9]+ PCM at .* ' + [regex]::Escape($expectedFormat))) {
         throw "Sound Blaster output was not '$expectedFormat'; inspect MACHINE.OUT."
     }

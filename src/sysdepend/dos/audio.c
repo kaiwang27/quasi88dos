@@ -8,6 +8,7 @@
 #include <string.h>
 #include "mame-quasi88.h"
 #include "getconf.h"
+#include "wait.h"
 
 #define SB_DMA_BYTES 32768U
 /* DSP command 40h uses an integer time constant. 211 gives 22,222 Hz;
@@ -18,6 +19,14 @@
 #define SB16_RATE_22K 22050U
 #define SB16_RATE_44K 44100U
 #define SB_GAIN 2
+/* Rate control: the core renders more or fewer samples per frame (at most
+   SB_RATE_ADJUST_MAX, 5%) to hold the DMA lead near its target, absorbing a
+   card clock that differs from the PIT and an emulator that falls behind real
+   time. The error is low-pass filtered so frame jitter does not modulate
+   pitch. */
+#define SB_RATE_ADJUST_MAX 0.05
+#define SB_RATE_ERROR_SMOOTH 16.0
+#define SB_DMA_START_CHECK_MS 200
 
 extern int dos_pcm_zero;
 extern int dos_sb_filter;
@@ -58,6 +67,15 @@ static int sb_atexit_registered;
 static unsigned source_rate;
 static unsigned source_samples;
 static double source_phase;
+static double sb_rate_scale, sb_rate_error, sb_rate_scale_min, sb_rate_scale_max;
+static unsigned sb_target_lead;
+/* Unwrapped DMA cursors. Their difference is the lead, which also tells an
+   underrun (playback passed the writer) from an overrun (writer lapped the
+   playback cursor); a ring-position difference alone cannot. */
+static unsigned long sb_written_abs, sb_consumed_abs;
+static unsigned sb_last_dma_pos;
+static unsigned long pcm_frames, pcm_underrun_resyncs, pcm_overrun_resyncs;
+static union wait_time sb_start_time;
 static long filter_state_1_q4;
 static long filter_state_2_q4;
 
@@ -75,7 +93,7 @@ static unsigned sb_time_constant(void)
 static unsigned next_frame_samples(void)
 {
     unsigned samples;
-    source_phase += sb_rate();
+    source_phase += sb_rate() * sb_rate_scale;
     samples = (unsigned)(source_phase / Machine->refresh_rate);
     source_phase -= samples * Machine->refresh_rate;
     return samples;
@@ -229,7 +247,10 @@ static int sb_reset(void)
 {
     unsigned i;
     outp(sb_base + 6, 1);
-    for (i = 0; i < 1000U; ++i) { }
+    /* The DSP needs a reset pulse of at least 3 us. An ISA port read takes
+       about 1 us of bus time regardless of CPU speed, so 16 reads give a
+       safe pulse without a CPU-speed-dependent delay loop. */
+    for (i = 0; i < 16U; ++i) (void)inp(sb_base + 6);
     outp(sb_base + 6, 0);
     for (i = 0; i < 100000U; ++i) {
         if (inp(sb_base + 0x0e) & 0x80)
@@ -282,8 +303,7 @@ static int allocate_dma_buffer(void)
     remainder = (0x10000U - physical) & 0xffffU;
     sb_dma_offset = remainder;
     sb_dma_buffer = (unsigned char __far *)MK_FP(sb_dma_selector, sb_dma_offset);
-    /* Unsigned 8-bit silence is 80h; signed 16-bit silence is 0000h. */
-    for (i = 0; i < SB_DMA_BYTES; ++i) sb_dma_buffer[i] = sb_16bit ? 0 : 0x80;
+    for (i = 0; i < SB_DMA_BYTES; ++i) sb_dma_buffer[i] = 0x80;
     return TRUE;
 }
 
@@ -345,6 +365,55 @@ static void stop_dsp_output(void)
     (void)inp(sb_ack_port);
 }
 
+static unsigned read_dma_position(void)
+{
+    return (sb_ring_samples - read_dma_count() - 1U) & (sb_ring_samples - 1U);
+}
+
+/* A card can answer DSP reset and version commands without its DMA transfer
+   running, e.g. a Plug and Play card that was not configured for DOS or a
+   BLASTER D/H value that does not match the card. Wait briefly for the 8237
+   cursor to move before trusting the device. */
+static int sb_dma_started(void)
+{
+    union wait_time start;
+    unsigned first = read_dma_count(), last = first;
+    wait_get_current_time(&start);
+    while (wait_calc_elasped_time_ms(&start) < SB_DMA_START_CHECK_MS)
+        if ((last = read_dma_count()) != first) return TRUE;
+    printf("DOS: Sound Blaster %s DMA %u did not start (count %04X -> %04X, IRQs %lu)\n",
+           sb_16bit ? "16-bit" : "8-bit", dma_channel(), first, last,
+           pcm_irq_count);
+    return FALSE;
+}
+
+/* Configure the ring and cursors for the current sb_16bit mode, start the
+   DSP, and confirm that DMA is moving. On failure the DSP is stopped and
+   reset, leaving the IRQ handler and buffer for another attempt. */
+static int sb_start_output(void)
+{
+    unsigned i;
+    sb_ack_port = sb_base + (sb_16bit ? 0x0f : 0x0e);
+    sb_ring_samples = sb_16bit ? SB_DMA_BYTES / 2 : SB_DMA_BYTES;
+    /* Unsigned 8-bit silence is 80h; signed 16-bit silence is 0000h. */
+    for (i = 0; i < SB_DMA_BYTES; ++i) sb_dma_buffer[i] = sb_16bit ? 0 : 0x80;
+    /* Keep a quarter of the ring queued (0.37 s at 22 kHz 8-bit, 0.19 s at
+       22 kHz 16-bit). The remaining three quarters leave room both to absorb
+       frame-time spikes and to tell a late writer from an early one. */
+    sb_target_lead = sb_ring_samples / 4;
+    sb_write_pos = sb_target_lead;
+    sb_written_abs = sb_target_lead;
+    sb_consumed_abs = 0;
+    sb_last_dma_pos = 0;
+    pcm_irq_count = 0;
+    start_dma();
+    if (sb_active && sb_dma_started()) return TRUE;
+    sb_active = FALSE;
+    stop_dsp_output();
+    sb_reset();
+    return FALSE;
+}
+
 /* The core does not call osd_stop_audio_stream() when its own sound setup
    fails after this backend started DMA (for example, a failed YM chip
    allocation). Stop the DSP and restore the IRQ vector at process exit so
@@ -371,6 +440,11 @@ int osd_start_audio_stream(int stereo)
     pcm_min_dma_lead = SB_DMA_BYTES;
     pcm_low_dma_lead_frames = 0;
     pcm_dma_underrun_frames = 0;
+    pcm_frames = 0;
+    pcm_underrun_resyncs = 0;
+    pcm_overrun_resyncs = 0;
+    sb_rate_scale = sb_rate_scale_min = sb_rate_scale_max = 1.0;
+    sb_rate_error = 0.0;
     sb_active = FALSE;
     sb_dma_selector = 0;
     sb_parse_blaster();
@@ -385,17 +459,8 @@ int osd_start_audio_stream(int stereo)
             sb_dsp_minor = minor;
         }
     }
-    /* DSP 4.xx (SB16) plays 16-bit PCM on its high DMA channel. Older DSPs,
-       -dossb8, or a missing/invalid H setting use the 8-bit path. */
-    sb_16bit = sb_dsp_major >= 4 && !dos_sb_8bit &&
-               sb_hdma >= 5 && sb_hdma <= 7;
-    sb_ack_port = sb_base + (sb_16bit ? 0x0f : 0x0e);
-    sb_ring_samples = sb_16bit ? SB_DMA_BYTES / 2 : SB_DMA_BYTES;
-    /* The DOS backend replaces xmame's Unix audio setup, so it must set the
-       core sample rate before the YM chips and mixer are started. */
-    Machine->sample_rate = sb_rate();
-    source_rate = sb_rate();
-    source_samples = next_frame_samples();
+    printf("DOS: Sound Blaster DSP %u.%02u at %03X IRQ %u DMA %u HDMA %u\n",
+           sb_dsp_major, sb_dsp_minor, sb_base, sb_irq, sb_dma, sb_hdma);
     if (!allocate_dma_buffer()) goto no_device;
 
     physical = (sb_dma_segment << 4) + sb_dma_offset;
@@ -408,46 +473,101 @@ int osd_start_audio_stream(int stereo)
         free_dma_buffer();
         goto no_device;
     }
-    /* Start with half the ring queued (0.74 s at 22 kHz 8-bit, 0.37 s at
-       22 kHz 16-bit). This absorbs short frame-time spikes while leaving
-       half the ring available for new samples. */
-    sb_write_pos = sb_ring_samples / 2;
-    start_dma();
+    /* Only DSP 4.xx is an SB16 with 16-bit high DMA. Anything else,
+       including an implausible version reply, -dossb8, or a missing or
+       invalid H setting, uses the 8-bit path. If 16-bit DMA does not start,
+       fall back to 8-bit before giving up. */
+    sb_16bit = sb_dsp_major == 4 && !dos_sb_8bit &&
+               sb_hdma >= 5 && sb_hdma <= 7;
+    if (!sb_start_output() && sb_16bit) {
+        sb_16bit = FALSE;
+        if (!sb_reset() || !sb_start_output()) sb_active = FALSE;
+    }
     if (!sb_active) {
-        stop_dsp_output();
-        sb_reset();
+        printf("DOS: Sound Blaster DMA did not start; check BLASTER I/D/H and"
+               " the card's DOS setup\n");
         remove_sb_irq();
         free_dma_buffer();
         goto no_device;
     }
+    /* The DOS backend replaces xmame's Unix audio setup, so it must set the
+       core sample rate before the YM chips and mixer are started. */
+    Machine->sample_rate = sb_rate();
+    source_rate = sb_rate();
+    source_samples = next_frame_samples();
     if (!sb_atexit_registered) sb_atexit_registered = atexit(sb_exit_cleanup) == 0;
     printf("DOS: Sound Blaster DSP %u.%02u PCM at %03X IRQ %u DMA %u, %u Hz %s mono\n",
            sb_dsp_major, sb_dsp_minor, sb_base, sb_irq, dma_channel(),
            sb_rate(), sb_16bit ? "16-bit" : "8-bit");
+    wait_get_current_time(&sb_start_time);
     return (int)source_samples;
 
 no_device:
     Machine->sample_rate = 0;
     source_rate = 0;
     source_samples = 0;
-    puts("DOS: Sound Blaster not detected; continuing silently.");
+    puts("DOS: Sound Blaster unavailable; continuing silently.");
     return 0;
+}
+
+/* Restart the writer a target lead ahead of playback. The samples between
+   the playback cursor and the new write position are stale ring data from a
+   previous pass, so replace them with silence: a brief gap instead of
+   crackling. */
+static void sb_resync(unsigned dma_pos)
+{
+    unsigned i, pos = dma_pos;
+    for (i = 0; i < sb_target_lead; ++i) {
+        if (sb_16bit) {
+            sb_dma_buffer[pos * 2U] = 0;
+            sb_dma_buffer[pos * 2U + 1U] = 0;
+        } else {
+            sb_dma_buffer[pos] = 0x80;
+        }
+        pos = (pos + 1) & (sb_ring_samples - 1U);
+    }
+    sb_write_pos = pos;
+    sb_written_abs = sb_consumed_abs + sb_target_lead;
 }
 
 int osd_update_audio_stream(INT16 *buffer)
 {
-    unsigned i, dma_count, dma_pos, dma_lead;
+    unsigned i, dma_pos, dma_lead;
+    long lead;
+    double error;
     if (!sb_active || !source_rate) return (int)source_samples;
-    /* Compare the producer cursor with the live 8237 playback cursor. A
-       short lead means the emulator is close to overwriting audio the DSP
-       has not played yet; zero lead means playback has caught the producer. */
-    dma_count = read_dma_count();
-    dma_pos = (sb_ring_samples - dma_count - 1U) & (sb_ring_samples - 1U);
-    dma_lead = (sb_write_pos - dma_pos) & (sb_ring_samples - 1U);
-    if (dma_lead > sb_ring_samples / 2U) dma_lead = 0;
+    ++pcm_frames;
+    /* Advance the unwrapped playback cursor by the distance the 8237 moved
+       since the last frame. A frame longer than a whole ring pass aliases;
+       the resulting false lead is caught below as an overrun and resynced. */
+    dma_pos = read_dma_position();
+    sb_consumed_abs += (dma_pos - sb_last_dma_pos) & (sb_ring_samples - 1U);
+    sb_last_dma_pos = dma_pos;
+    lead = (long)(sb_written_abs - sb_consumed_abs);
+    if (lead < (long)source_samples) {
+        /* Playback caught or passed the writer. */
+        if (lead < 0) {
+            ++pcm_underrun_resyncs;
+            sb_resync(dma_pos);
+        }
+        ++pcm_dma_underrun_frames;
+    } else if (lead > (long)(sb_ring_samples - source_samples * 2U)) {
+        /* The writer would overwrite audio that has not played yet. */
+        ++pcm_overrun_resyncs;
+        sb_resync(dma_pos);
+    }
+    lead = (long)(sb_written_abs - sb_consumed_abs);
+    dma_lead = lead < 0 ? 0 : (unsigned)lead;
     if (dma_lead < pcm_min_dma_lead) pcm_min_dma_lead = dma_lead;
-    if (dma_lead < source_samples) ++pcm_dma_underrun_frames;
     if (dma_lead < source_samples * 2U) ++pcm_low_dma_lead_frames;
+    /* Positive error: the lead is short, so render slightly more samples. */
+    error = ((double)sb_target_lead - (double)dma_lead) / (double)sb_target_lead;
+    if (error > 1.0) error = 1.0;
+    else if (error < -1.0) error = -1.0;
+    sb_rate_error += (error - sb_rate_error) / SB_RATE_ERROR_SMOOTH;
+    sb_rate_scale = 1.0 + SB_RATE_ADJUST_MAX * sb_rate_error;
+    if (sb_rate_scale < sb_rate_scale_min) sb_rate_scale_min = sb_rate_scale;
+    if (sb_rate_scale > sb_rate_scale_max) sb_rate_scale_max = sb_rate_scale;
     for (i = 0; i < source_samples; ++i) {
         int mono = (((int)buffer[i * 2] + (int)buffer[i * 2 + 1]) / 2) * SB_GAIN;
         unsigned magnitude;
@@ -490,6 +610,7 @@ int osd_update_audio_stream(INT16 *buffer)
         }
         sb_write_pos = (sb_write_pos + 1) & (sb_ring_samples - 1);
     }
+    sb_written_abs += source_samples;
     source_samples = next_frame_samples();
     return (int)source_samples;
 }
@@ -504,6 +625,19 @@ void osd_stop_audio_stream(void)
                pcm_dma_samples_non_silent, dma_count, pcm_irq_count,
                pcm_min_dma_lead, pcm_low_dma_lead_frames,
                pcm_dma_underrun_frames);
+        {
+            /* Measured against the PIT: the card's real playback rate and
+               the emulator's speed relative to real time. Together they show
+               whether drift came from the card clock or from slow frames. */
+            int ms = wait_calc_elasped_time_ms(&sb_start_time);
+            double seconds = ms > 0 ? ms / 1000.0 : 0.0;
+            printf("DOS: audio timing: %.1f s; card played %.0f Hz; emulation %.1f%% of real time; target lead=%u; resyncs underrun=%lu overrun=%lu; rate scale %.4f..%.4f\n",
+                   seconds,
+                   seconds > 0.0 ? sb_consumed_abs / seconds : 0.0,
+                   seconds > 0.0 ? pcm_frames * 100.0 / (seconds * Machine->refresh_rate) : 0.0,
+                   sb_target_lead, pcm_underrun_resyncs, pcm_overrun_resyncs,
+                   sb_rate_scale_min, sb_rate_scale_max);
+        }
     }
     if (sb_active) {
         stop_dsp_output();

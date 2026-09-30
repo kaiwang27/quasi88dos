@@ -256,6 +256,99 @@ vector. Without it, the card could keep interrupting into the exited program.
 In a DOSBox-X run whose sound setup failed, the shutdown statistics line now
 appears after `...FAILED, abort`, which shows the cleanup ran.
 
+### Physical AZT2320 results and DMA rate control
+
+2026-09-30, user-reported physical PC results for `YS1HW.BAT` (Ys I, OPNA).
+`BLASTER` was unset, so the defaults `220h`, IRQ 5, DMA 1 were used:
+
+- Booted to the DOS prompt with F8: the card reported DSP 3.01, so the 8-bit
+  path was used. Sound played. The user heard it as much better than before,
+  but with crackling and background hiss. The log showed 1,126 underrun
+  frames out of 2,579 and a minimum DMA lead of 0.
+- Windows 98 "Restart in MS-DOS mode": the DSP answered with version 3.01, but
+  DMA never moved (count `7FFF`, 0 IRQs), so there was no sound. The card was
+  probably not configured for DOS in that mode.
+- DOSBox-X on the development PC (dynamic core): 16-bit at 22,050 Hz with 0
+  underruns. The user heard slight crackling and less hiss.
+
+The producer was open-loop: it wrote exactly the nominal samples per emulated
+frame, while the card played at its own clock. Frame pacing drops time after
+10 late frames. Any difference between the emulator's real-time speed and the
+card's clock therefore drained the initial lead. Playback then read stale
+ring data, heard as crackling. The backend now:
+
+- Tracks unwrapped write and playback cursors. Each frame it adjusts the
+  samples requested from the core by at most 5%, holding the DMA lead near a
+  quarter of the ring (8,192 samples for 8-bit, 4,096 for 16-bit). The error
+  is low-pass filtered to avoid audible pitch flutter.
+- Resyncs when playback has passed the writer, or when the writer would
+  overwrite unplayed audio. It restarts the writer a target lead ahead of
+  playback and fills the gap with silence, so a dropout is a short gap
+  instead of stale data.
+- Waits up to 200 ms after starting DMA for the 8237 count to move. If it does
+  not, it prints `DMA n did not start; check BLASTER I/D/H and the card's DOS
+  setup` and continues silently.
+- Prints an `audio timing` line at exit. It shows the card's measured
+  playback rate and emulation speed as a percentage of real time, both
+  against the PIT. It also shows the target lead, underrun and overrun
+  resync counts, and the rate-scale range used.
+
+DOSBox-X checks with Ys I from a disk-image copy, 1,500 frames, `-dosvga`:
+
+- Dynamic core at maximum cycles: 99.6% of real time. The 16-bit and 8-bit
+  runs each had 0 underrun frames and 0 resyncs, with rate scale up to
+  1.0199 and 1.0118.
+- Normal core at 30,000 fixed cycles: only 23% of real time, so underruns
+  cannot be avoided. The resync handled them (404 at 16-bit, 230 at 8-bit)
+  instead of letting playback read stale ring data.
+- A wrong `BLASTER` DMA channel (`D3`) produced the new DMA-start message and
+  a silent, clean run.
+
+The 60-frame `-SoundTest`, `-Sound44kTest`, and `-Sound8Test` regressions at
+12,000 cycles still pass. Those runs are at about 10% of real time, which
+explains their long-standing underrun counts. The physical-PC effect of
+these changes is not yet tested. Remaining 8-bit hiss on DSP 3.xx cards is
+inherent to 8-bit output. The AZT2320's 16-bit Windows Sound System codec
+would need a separate backend.
+
+The next physical run of that build had no sound. The log reported
+`DMA 5 did not start`, so the card had been treated as an SB16. The same card
+reported DSP 3.01 before. A second log reported `DMA 1 did not start`.
+`BLASTER` was unset in both logs. The reset pulse was an empty 1,000-iteration
+loop, which is CPU-speed dependent and may be removed by the compiler. On a
+fast CPU it can be shorter than the DSP's 3 us minimum. The detection path
+was changed as follows:
+
+- The reset pulse is now 16 ISA port reads at base+6. Each read takes about
+  1 us of bus time, independent of CPU speed.
+- The DSP version is logged before DMA starts: `Sound Blaster DSP x.yy at
+  ... DMA d HDMA h`.
+- Only DSP major version 4 selects 16-bit. Other replies use 8-bit, including
+  implausible ones.
+- If 16-bit DMA does not start, the DSP is reset and the 8-bit path is tried.
+  A failed check logs the channel, the DMA count before and after, and the IRQ
+  count.
+
+DOSBox-X at 30,000 cycles, normal core: an SB16 selected 16-bit. An SB16
+with `BLASTER` `H7`, while the card used HDMA 5, logged `16-bit DMA 7 did not
+start (count 3FFF -> 3FFF, IRQs 0)`, then played 8-bit. `sbtype=sbpro2`
+(DSP 3.02) selected 8-bit directly. The 12,000-cycle `-SoundTest` and
+`-Sound8Test` regressions pass.
+
+Physical result, user-reported 2026-09-30: after a full power cycle and an
+F8 command-prompt boot, `YS1HW.BAT` detected DSP 3.01 at `220h`, IRQ 5, DMA 1
+with `BLASTER` unset. It played 8-bit mono at 22,222 Hz nominal. Over 64.3 s
+and 3,556 frames, the log showed 0 underrun frames and 0 resyncs, minimum
+DMA lead 3,206 samples, emulation at 99.8% of real time, and rate scale
+1.0000 to 1.0251. The card's measured playback rate was 22,755 Hz, about 2.4%
+above nominal. That clock offset explains the earlier open-loop underruns;
+rate control now absorbs it. The user reports very good sound, with the hiss
+expected of 8-bit output. Under Windows 98 "Restart in MS-DOS mode", even
+with `BLASTER=A220 I5 D1 T4`, DSP 3.01 answered but DMA did not move
+(`7FFF -> 7FFF`, 0 IRQs). QUASI88 now reports this and continues silently.
+The card needs its DOS initialization in that mode, for example from
+`DOSSTART.BAT`.
+
 #### DOSBox-X dynamic core: use `core=normal`
 
 With `core=dynamic` or `core=auto`, DOSBox-X 2026.08.31 gives wrong

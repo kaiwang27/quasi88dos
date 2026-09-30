@@ -11,7 +11,8 @@ param(
     [switch]$ConfigTest,
     [switch]$JoystickMode,
     [switch]$SoundTest,
-    [switch]$Sound44kTest
+    [switch]$Sound44kTest,
+    [switch]$Sound8Test
 )
 $ErrorActionPreference = 'Stop'
 if ($Mk2srDirectory -and -not $RomDirectory) { throw '-Mk2srDirectory requires the base -RomDirectory.' }
@@ -19,7 +20,8 @@ if ($DiskTest -and -not $RomDirectory) { throw '-DiskTest requires real ROMs via
 if ($StateTest -and $RomDirectory) { throw '-StateTest currently uses the synthetic CPU marker ROMs; omit -RomDirectory.' }
 if ($SnapshotTest -and $RomDirectory) { throw '-SnapshotTest currently uses the synthetic CPU marker ROMs; omit -RomDirectory.' }
 if ($ConfigTest -and $RomDirectory) { throw '-ConfigTest currently uses the synthetic CPU marker ROMs; omit -RomDirectory.' }
-if (($SoundTest -or $Sound44kTest) -and (-not $RomDirectory -or $Frames -lt 60)) { throw 'Sound tests require real ROMs and at least 60 frames.' }
+$anySoundTest = $SoundTest -or $Sound44kTest -or $Sound8Test
+if ($anySoundTest -and (-not $RomDirectory -or $Frames -lt 60)) { throw 'Sound tests require real ROMs and at least 60 frames.' }
 if (-not $DosBoxX) { $DosBoxX = (Get-Command dosbox-x.exe -ErrorAction Stop).Source }
 $DosBoxX = (Resolve-Path -LiteralPath $DosBoxX).Path
 $repoRoot = Split-Path $PSScriptRoot -Parent
@@ -38,7 +40,7 @@ foreach ($name in @('ROM', 'EMPTY', 'SHORT')) {
 }
 [IO.File]::WriteAllBytes((Join-Path $testDir 'SHORT\N88.ROM'), [byte[]]@(0))
 $configSaveOption = ''
-$soundRateOption = if ($Sound44kTest) { '-dossb44k' } else { '' }
+$soundRateOption = @($(if ($Sound44kTest) { '-dossb44k' }), $(if ($Sound8Test) { '-dossb8' })) -join ' '
 if ($RomDirectory) {
     $RomDirectory = (Resolve-Path -LiteralPath $RomDirectory).Path
     # Copy only ROM files. Originals and all disk images remain outside the mount.
@@ -137,6 +139,7 @@ sbtype=sb16
 sbbase=220
 irq=5
 dma=1
+hdma=5
 blaster environment variable=true
 [joystick]
 joysticktype=none
@@ -169,11 +172,15 @@ try {
     if ($JoystickMode -and $output -notmatch 'PC-88 joystick mode selected') {
         throw 'Joystick mode was not selected; inspect MACHINE.OUT.'
     }
-    if (($SoundTest -or $Sound44kTest) -and $output -notmatch 'DMA count=(?!3FFF)[0-9A-F]{4}; IRQs=[1-9][0-9]*') {
+    if ($anySoundTest -and $output -notmatch 'DMA count=(?!3FFF)[0-9A-F]{4}; IRQs=[1-9][0-9]*') {
         throw 'Sound Blaster DMA did not advance and service an IRQ; inspect MACHINE.OUT.'
     }
-    if ($Sound44kTest -and $output -notmatch 'Sound Blaster PCM at .* 43478 Hz mono') {
-        throw 'High-rate DSP mode did not select 43,478 Hz; inspect MACHINE.OUT.'
+    # The test configuration emulates an SB16 (DSP 4.xx, HDMA 5): 16-bit
+    # output is the default and -dossb8 forces the 8-bit DSP path.
+    $expectedFormat = if ($Sound8Test) { 'DMA 1, ' + $(if ($Sound44kTest) { '43478' } else { '22222' }) + ' Hz 8-bit mono' }
+                      else { 'DMA 5, ' + $(if ($Sound44kTest) { '44100' } else { '22050' }) + ' Hz 16-bit mono' }
+    if ($anySoundTest -and $output -notmatch ('Sound Blaster DSP 4\.[0-9]+ PCM at .* ' + [regex]::Escape($expectedFormat))) {
+        throw "Sound Blaster output was not '$expectedFormat'; inspect MACHINE.OUT."
     }
     if ($VgaTest -and ($output -notmatch 'VGA plane readback: PASS' -or
                        $output -notmatch 'original video mode restored: PASS')) {

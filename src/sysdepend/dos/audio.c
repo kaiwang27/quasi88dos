@@ -1,4 +1,5 @@
-/* Sound Blaster-compatible 8-bit DMA output for the DOS target. */
+/* Sound Blaster-compatible DMA output for the DOS target: 16-bit on SB16
+   (DSP 4.xx), otherwise 8-bit. */
 #include <conio.h>
 #include <dos.h>
 #include <i86.h>
@@ -13,15 +14,25 @@
    233 gives 43,478 Hz for an optional high-rate mono comparison. */
 #define SB_RATE_22K 22222U
 #define SB_RATE_44K 43478U
+/* SB16 DSP command 41h takes the output rate directly. */
+#define SB16_RATE_22K 22050U
+#define SB16_RATE_44K 44100U
 #define SB_GAIN 2
 
 extern int dos_pcm_zero;
 extern int dos_sb_filter;
 extern int dos_sb_44k;
+extern int dos_sb_8bit;
 
 static unsigned sb_base = 0x220;
 static unsigned sb_irq = 5;
 static unsigned sb_dma = 1;
+static unsigned sb_hdma = 5;
+static unsigned sb_ack_port;          /* 0Eh for 8-bit, 0Fh for 16-bit IRQs */
+static unsigned sb_dsp_major, sb_dsp_minor;
+static int sb_16bit;
+/* Ring positions below count samples; 16-bit samples use two bytes. */
+static unsigned sb_ring_samples;
 static unsigned sb_dma_selector;
 static unsigned sb_dma_segment;
 static unsigned sb_dma_offset;
@@ -43,6 +54,7 @@ static unsigned char sb_pic_master_mask;
 static unsigned char sb_pic_slave_mask;
 static int sb_pic_masks_saved;
 static int sb_active;
+static int sb_atexit_registered;
 static unsigned source_rate;
 static unsigned source_samples;
 static double source_phase;
@@ -51,6 +63,7 @@ static long filter_state_2_q4;
 
 static unsigned sb_rate(void)
 {
+    if (sb_16bit) return dos_sb_44k ? SB16_RATE_44K : SB16_RATE_22K;
     return dos_sb_44k ? SB_RATE_44K : SB_RATE_22K;
 }
 
@@ -96,7 +109,7 @@ static int lock_interrupt_memory(void *address, unsigned long length)
 static void __interrupt __far sb_irq_handler(void)
 {
     ++pcm_irq_count;
-    (void)inp(sb_base + 0x0e);        /* acknowledge the DSP's 8-bit IRQ */
+    (void)inp(sb_ack_port);           /* acknowledge the DSP's 8/16-bit IRQ */
     if (sb_irq >= 8) outp(0xa0, 0x20);
     outp(0x20, 0x20);
 }
@@ -105,7 +118,7 @@ static int install_sb_irq(void)
 {
     unsigned long handler = (unsigned long)sb_irq_handler;
     if (!lock_interrupt_memory((void *)handler, 512) ||
-        !lock_interrupt_memory(&sb_base, sizeof(sb_base)) ||
+        !lock_interrupt_memory(&sb_ack_port, sizeof(sb_ack_port)) ||
         !lock_interrupt_memory(&sb_irq, sizeof(sb_irq)) ||
         !lock_interrupt_memory((void *)&pcm_irq_count, sizeof(pcm_irq_count))) return FALSE;
     sb_vector = sb_irq < 8 ? sb_irq + 8 : sb_irq + 0x68;
@@ -155,8 +168,24 @@ static void remove_sb_irq(void)
 
 static unsigned char dma_page_port(unsigned channel)
 {
-    static const unsigned char ports[4] = {0x87, 0x83, 0x81, 0x82};
-    return ports[channel & 3];
+    static const unsigned char ports[8] =
+        {0x87, 0x83, 0x81, 0x82, 0x8f, 0x8b, 0x89, 0x8a};
+    return ports[channel & 7];
+}
+
+/* 8237 register ports for the active channel: DMA 0-3 on the first
+   controller, 16-bit DMA 5-7 on the second (word-addressed) controller. */
+static unsigned dma_channel(void) { return sb_16bit ? sb_hdma : sb_dma; }
+static unsigned dma_mask_port(void) { return sb_16bit ? 0xd4 : 0x0a; }
+static unsigned dma_mode_port(void) { return sb_16bit ? 0xd6 : 0x0b; }
+static unsigned dma_flipflop_port(void) { return sb_16bit ? 0xd8 : 0x0c; }
+static unsigned dma_address_port(void)
+{
+    return sb_16bit ? 0xc0 + (sb_hdma & 3) * 4 : (sb_dma & 3) * 2;
+}
+static unsigned dma_count_port(void)
+{
+    return dma_address_port() + (sb_16bit ? 2 : 1);
 }
 
 static int sb_wait_write(void)
@@ -174,11 +203,23 @@ static int sb_write(unsigned char value)
     return TRUE;
 }
 
+static int sb_read(unsigned char *value)
+{
+    unsigned i;
+    for (i = 0; i < 100000U; ++i)
+        if (inp(sb_base + 0x0e) & 0x80) {
+            *value = (unsigned char)inp(sb_base + 0x0a);
+            return TRUE;
+        }
+    return FALSE;
+}
+
+/* Remaining transfers minus one: bytes on 8-bit DMA, words on 16-bit DMA. */
 static unsigned read_dma_count(void)
 {
-    unsigned port = 0x01U + (sb_dma & 3U) * 2U;
+    unsigned port = dma_count_port();
     unsigned low, high;
-    outp(0x0c, 0);
+    outp(dma_flipflop_port(), 0);
     low = inp(port);
     high = inp(port);
     return low | (high << 8);
@@ -219,6 +260,7 @@ static void sb_parse_blaster(void)
         if (key == 'A' || key == 'a') sb_base = value;
         else if (key == 'I' || key == 'i') sb_irq = value;
         else if (key == 'D' || key == 'd') sb_dma = value;
+        else if (key == 'H' || key == 'h') sb_hdma = value;
         while (*p == ' ' || *p == '\t') ++p;
     }
 }
@@ -240,7 +282,8 @@ static int allocate_dma_buffer(void)
     remainder = (0x10000U - physical) & 0xffffU;
     sb_dma_offset = remainder;
     sb_dma_buffer = (unsigned char __far *)MK_FP(sb_dma_selector, sb_dma_offset);
-    for (i = 0; i < SB_DMA_BYTES; ++i) sb_dma_buffer[i] = 0x80;
+    /* Unsigned 8-bit silence is 80h; signed 16-bit silence is 0000h. */
+    for (i = 0; i < SB_DMA_BYTES; ++i) sb_dma_buffer[i] = sb_16bit ? 0 : 0x80;
     return TRUE;
 }
 
@@ -259,38 +302,66 @@ static void free_dma_buffer(void)
 static void start_dma(void)
 {
     unsigned physical = (sb_dma_segment << 4) + sb_dma_offset;
-    unsigned channel = sb_dma & 3;
-    unsigned address_port = 0x00 + channel * 2;
-    unsigned count_port = address_port + 1;
-    outp(0x0a, 0x04 | channel);       /* mask DMA channel */
-    outp(0x0b, 0x58 | channel);       /* single, auto-init, memory-to-device */
-    outp(0x0c, 0);                    /* clear byte pointer flip-flop */
-    outp(address_port, physical & 0xff);
-    outp(address_port, (physical >> 8) & 0xff);
-    outp(dma_page_port(channel), (physical >> 16) & 0xff);
-    outp(0x0c, 0);
-    outp(count_port, (SB_DMA_BYTES - 1) & 0xff);
-    outp(count_port, (SB_DMA_BYTES - 1) >> 8);
-    if (!sb_write(0x40) || !sb_write((unsigned char)sb_time_constant()) ||
-        !sb_write(0x48) || !sb_write((SB_DMA_BYTES - 1) & 0xff) ||
-        !sb_write((SB_DMA_BYTES - 1) >> 8) || !sb_write(0xd1)) return;
-    outp(0x0a, channel);              /* enable DMA before asserting DSP DRQ */
-    if (!sb_write(0x1c)) return;
+    unsigned channel = dma_channel() & 3;
+    unsigned address_port = dma_address_port();
+    unsigned count_port = dma_count_port();
+    /* The 16-bit controller takes a word address; bit 0 of its page is
+       ignored. The buffer is 64 KiB aligned, so it cannot cross a page. */
+    unsigned address = sb_16bit ? physical >> 1 : physical;
+    unsigned last = sb_ring_samples - 1;
+    outp(dma_mask_port(), 0x04 | channel);   /* mask DMA channel */
+    outp(dma_mode_port(), 0x58 | channel);   /* single, auto-init, read */
+    outp(dma_flipflop_port(), 0);
+    outp(address_port, address & 0xff);
+    outp(address_port, (address >> 8) & 0xff);
+    outp(dma_page_port(dma_channel()), (physical >> 16) & 0xff);
+    outp(dma_flipflop_port(), 0);
+    outp(count_port, last & 0xff);
+    outp(count_port, last >> 8);
+    if (sb_16bit) {
+        unsigned rate = sb_rate();
+        if (!sb_write(0xd1) || !sb_write(0x41) ||
+            !sb_write((unsigned char)(rate >> 8)) ||
+            !sb_write((unsigned char)(rate & 0xff))) return;
+        outp(dma_mask_port(), channel);      /* enable DMA before DRQ */
+        /* B6h: 16-bit output, auto-init, FIFO; mode 10h: signed mono. */
+        if (!sb_write(0xb6) || !sb_write(0x10) ||
+            !sb_write(last & 0xff) || !sb_write(last >> 8)) return;
+    } else {
+        if (!sb_write(0x40) || !sb_write((unsigned char)sb_time_constant()) ||
+            !sb_write(0x48) || !sb_write(last & 0xff) ||
+            !sb_write(last >> 8) || !sb_write(0xd1)) return;
+        outp(dma_mask_port(), channel);      /* enable DMA before DRQ */
+        if (!sb_write(0x1c)) return;
+    }
     sb_active = TRUE;
+}
+
+static void stop_dsp_output(void)
+{
+    sb_write(sb_16bit ? 0xd5 : 0xd0);        /* pause 16/8-bit DMA */
+    sb_write(0xd3);                          /* turn off the DSP speaker */
+    outp(dma_mask_port(), 0x04 | (dma_channel() & 3));
+    (void)inp(sb_ack_port);
+}
+
+/* The core does not call osd_stop_audio_stream() when its own sound setup
+   fails after this backend started DMA (for example, a failed YM chip
+   allocation). Stop the DSP and restore the IRQ vector at process exit so
+   the card never interrupts into freed program memory. */
+static void sb_exit_cleanup(void)
+{
+    if (sb_active || sb_irq_installed || sb_dma_selector) osd_stop_audio_stream();
 }
 
 int osd_start_audio_stream(int stereo)
 {
     unsigned physical;
     (void)stereo;
-    /* The DOS backend replaces xmame's Unix audio setup, so it must set the
-       core sample rate before the YM chips and mixer are started. */
-    Machine->sample_rate = sb_rate();
-    source_rate = sb_rate();
+    sb_16bit = FALSE;
     source_phase = 0.0;
     filter_state_1_q4 = 0;
     filter_state_2_q4 = 0;
-    source_samples = next_frame_samples();
     pcm_samples_total = 0;
     pcm_samples_non_silent = 0;
     pcm_dma_samples_non_silent = 0;
@@ -305,7 +376,27 @@ int osd_start_audio_stream(int stereo)
     sb_parse_blaster();
     if (sb_dma > 3 || sb_irq > 15 || sb_base < 0x200 || sb_base > 0x3f0)
         goto no_device;
-    if (!sb_reset() || !allocate_dma_buffer()) goto no_device;
+    if (!sb_reset()) goto no_device;
+    sb_dsp_major = sb_dsp_minor = 0;
+    if (sb_write(0xe1)) {
+        unsigned char major, minor;
+        if (sb_read(&major) && sb_read(&minor)) {
+            sb_dsp_major = major;
+            sb_dsp_minor = minor;
+        }
+    }
+    /* DSP 4.xx (SB16) plays 16-bit PCM on its high DMA channel. Older DSPs,
+       -dossb8, or a missing/invalid H setting use the 8-bit path. */
+    sb_16bit = sb_dsp_major >= 4 && !dos_sb_8bit &&
+               sb_hdma >= 5 && sb_hdma <= 7;
+    sb_ack_port = sb_base + (sb_16bit ? 0x0f : 0x0e);
+    sb_ring_samples = sb_16bit ? SB_DMA_BYTES / 2 : SB_DMA_BYTES;
+    /* The DOS backend replaces xmame's Unix audio setup, so it must set the
+       core sample rate before the YM chips and mixer are started. */
+    Machine->sample_rate = sb_rate();
+    source_rate = sb_rate();
+    source_samples = next_frame_samples();
+    if (!allocate_dma_buffer()) goto no_device;
 
     physical = (sb_dma_segment << 4) + sb_dma_offset;
     if ((physical & 0xffffU) + SB_DMA_BYTES > 0x10000UL) {
@@ -317,20 +408,22 @@ int osd_start_audio_stream(int stereo)
         free_dma_buffer();
         goto no_device;
     }
-    /* Start with roughly 0.74 seconds queued. This absorbs short frame-time
-       spikes while leaving half the ring available for new samples. */
-    sb_write_pos = SB_DMA_BYTES / 2;
+    /* Start with half the ring queued (0.74 s at 22 kHz 8-bit, 0.37 s at
+       22 kHz 16-bit). This absorbs short frame-time spikes while leaving
+       half the ring available for new samples. */
+    sb_write_pos = sb_ring_samples / 2;
     start_dma();
     if (!sb_active) {
-        sb_write(0xd0);
+        stop_dsp_output();
         sb_reset();
-        outp(0x0a, 0x04 | sb_dma);
         remove_sb_irq();
         free_dma_buffer();
         goto no_device;
     }
-    printf("DOS: Sound Blaster PCM at %03X IRQ %u DMA %u, %u Hz mono\n",
-           sb_base, sb_irq, sb_dma, sb_rate());
+    if (!sb_atexit_registered) sb_atexit_registered = atexit(sb_exit_cleanup) == 0;
+    printf("DOS: Sound Blaster DSP %u.%02u PCM at %03X IRQ %u DMA %u, %u Hz %s mono\n",
+           sb_dsp_major, sb_dsp_minor, sb_base, sb_irq, dma_channel(),
+           sb_rate(), sb_16bit ? "16-bit" : "8-bit");
     return (int)source_samples;
 
 no_device:
@@ -349,9 +442,9 @@ int osd_update_audio_stream(INT16 *buffer)
        short lead means the emulator is close to overwriting audio the DSP
        has not played yet; zero lead means playback has caught the producer. */
     dma_count = read_dma_count();
-    dma_pos = (SB_DMA_BYTES - dma_count - 1U) & (SB_DMA_BYTES - 1U);
-    dma_lead = (sb_write_pos - dma_pos) & (SB_DMA_BYTES - 1U);
-    if (dma_lead > SB_DMA_BYTES / 2U) dma_lead = 0;
+    dma_pos = (sb_ring_samples - dma_count - 1U) & (sb_ring_samples - 1U);
+    dma_lead = (sb_write_pos - dma_pos) & (sb_ring_samples - 1U);
+    if (dma_lead > sb_ring_samples / 2U) dma_lead = 0;
     if (dma_lead < pcm_min_dma_lead) pcm_min_dma_lead = dma_lead;
     if (dma_lead < source_samples) ++pcm_dma_underrun_frames;
     if (dma_lead < source_samples * 2U) ++pcm_low_dma_lead_frames;
@@ -378,18 +471,24 @@ int osd_update_audio_stream(INT16 *buffer)
         if (magnitude > pcm_peak) pcm_peak = magnitude;
         ++pcm_samples_total;
         if (mono != 0) ++pcm_samples_non_silent;
-        /* Round to the nearest 8-bit step. Truncating with a plain shift
-           floors every small negative value to -1 LSB, turning a quiet or
-           decaying tone into a lingering half-wave buzz. */
-        if (dos_pcm_zero) sample = 128;
-        else {
+        if (dos_pcm_zero) mono = 0;
+        if (sb_16bit) {
+            /* Signed little-endian 16-bit PCM keeps the core's resolution. */
+            unsigned offset = sb_write_pos * 2U;
+            if (mono != 0) ++pcm_dma_samples_non_silent;
+            sb_dma_buffer[offset] = (unsigned char)(mono & 0xff);
+            sb_dma_buffer[offset + 1] = (unsigned char)((mono >> 8) & 0xff);
+        } else {
+            /* Round to the nearest 8-bit step. Truncating with a plain shift
+               floors every small negative value to -1 LSB, turning a quiet
+               or decaying tone into a lingering half-wave buzz. */
             int rounded = (mono + 128) >> 8;
             if (rounded > 127) rounded = 127;
             sample = (unsigned char)(rounded + 128);
+            if (sample != 128) ++pcm_dma_samples_non_silent;
+            sb_dma_buffer[sb_write_pos] = sample;
         }
-        if (sample != 128) ++pcm_dma_samples_non_silent;
-        sb_dma_buffer[sb_write_pos] = sample;
-        sb_write_pos = (sb_write_pos + 1) & (SB_DMA_BYTES - 1);
+        sb_write_pos = (sb_write_pos + 1) & (sb_ring_samples - 1);
     }
     source_samples = next_frame_samples();
     return (int)source_samples;
@@ -407,10 +506,7 @@ void osd_stop_audio_stream(void)
                pcm_dma_underrun_frames);
     }
     if (sb_active) {
-        sb_write(0xd0);               /* pause 8-bit DMA */
-        sb_write(0xd3);               /* turn off the DSP speaker */
-        outp(0x0a, 0x04 | sb_dma);
-        (void)inp(sb_base + 0x0e);
+        stop_dsp_output();
         remove_sb_irq();
         sb_active = FALSE;
     }

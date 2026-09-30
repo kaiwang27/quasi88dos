@@ -217,6 +217,61 @@ four 8-bit steps, and the Ys I run peaked at 24,244 with the current gain, so
 raising the gain would clip game music. Some quantization noise on very quiet
 tones is inherent to 8-bit output.
 
+The user confirmed that rounding fixed the lengthened, distorted tone, but it
+still sounded hissy. The fade was also stepped rather than gradual, as expected
+from about four 8-bit levels.
+
+### SB16 16-bit output
+
+When the DSP reports version 4.xx (SB16) and the `BLASTER` `H` value is 5-7
+(default 5), the backend plays signed 16-bit mono PCM. It uses auto-init DMA on
+that high channel and command `B6h` mode `10h`. The rate is set directly with
+DSP command `41h`: 22,050 Hz by default and 44,100 Hz with `-dossb44k`. The
+16-bit IRQ is acknowledged at base+`0Fh`. The 32 KiB ring holds 16,384 samples
+and starts with an 8,192-sample lead. The 16-bit controller takes a word
+address; the 64 KiB-aligned buffer cannot cross a 128 KiB DMA page. Older DSPs,
+a missing or invalid `H` value, or `-dossb8` select the existing 8-bit path at
+22,222 or 43,478 Hz. Shutdown pauses the active DSP mode with `D5h` or `D0h`,
+then masks its DMA channel.
+The core's 16-bit samples are written unchanged apart from the existing mono
+downmix and gain. Stereo output is not implemented yet.
+
+2026-09-30: the Machine target built with no new warnings. The DOSBox-X test
+configuration now sets `hdma=5`. At 12,000 cycles with the split real-ROM set,
+`-SoundTest` passed with `DSP 4.05 ... DMA 5, 22050 Hz 16-bit mono`, and
+`-Sound44kTest` passed at 44,100 Hz. `-Sound8Test` forced
+`DMA 1, 22222 Hz 8-bit mono` and also passed. Each run advanced DMA and
+serviced IRQs. These ROM runs are silent. A 3-frame VGA run at 3,000 cycles
+also selected the 16-bit path, serviced IRQs, and exited cleanly. A 60-frame
+sound run at 3,000 cycles exceeded the script's 45-second timeout; this is a
+test-duration limit, not an observed audio failure. The user then compared
+`T32L1C` in DOSBox-X and reported that 16-bit output sounds like the Windows
+version, and `-dossb8` sounds worse. No physical SB16 or SB Pro-class card
+has been tested.
+
+If the core's sound setup fails after the Sound Blaster has started, the core
+does not call `osd_stop_audio_stream()`. The backend therefore registers an
+`atexit` cleanup that stops the DSP and DMA, then restores the PIC mask and IRQ
+vector. Without it, the card could keep interrupting into the exited program.
+In a DOSBox-X run whose sound setup failed, the shutdown statistics line now
+appears after `...FAILED, abort`, which shows the cleanup ran.
+
+#### DOSBox-X dynamic core: use `core=normal`
+
+With `core=dynamic` or `core=auto`, DOSBox-X 2026.08.31 gives wrong
+floating-point results in CauseWay programs after four launches in the same
+session. A ten-line Open Watcom/CauseWay test computing `22050.0 / 55.4f`
+printed 398 for runs 1-4, then 0, then 399, in a repeating pattern. The same
+program printed 398 for all 12 runs with `core=normal`. The x87 status and tag
+words were clean at each startup, and `_fpreset()` did not help. The build from
+commit `2b220f4`, before the SB16 work, reproduced it too. In QUASI88 the
+refresh rate reads as 0, so the core aborts with `...FAILED, abort` during
+sound setup. This is a DOSBox-X dynamic-core problem, not a QUASI88 fault and
+not evidence about real hardware. Use `core=normal` for DOS testing, or
+restart DOSBox-X between launches. Killing DOSBox-X during a run leaves a
+CauseWay swap file (a random extensionless name) in the current directory.
+Delete it only when no CauseWay program is running.
+
 The active backend uses a 32 KiB DMA ring with a 16 KiB initial lead and carries
 fractional samples across frames to keep its producer rate aligned with the
 selected DSP rate. `PCMZERO.BAT` sends unsigned 8-bit center samples while
@@ -236,8 +291,9 @@ at least 60 frames with the split real-ROM set:
 The sound check requires a changed DMA count and at least one IRQ in
 `MACHINE.OUT`. It validates DMA/IRQ delivery even when the ROM produces silence;
 the BASIC `CMD PLAY "T32L1C"` check is still needed to confirm audible
-synthesized audio. Add `-Sound44kTest` to this command to verify that DOSBox-X
-selects the experimental 43,478 Hz mode.
+synthesized audio. The test configuration emulates an SB16 with `hdma=5`, so
+it checks the 16-bit path by default. Add `-Sound44kTest` to check the
+44,100 Hz rate, or add `-Sound8Test` to force and check the 8-bit DSP path.
 
 The DOS entry point requires a 32768-byte `N88.ROM`, or `N88N.ROM`/`N80.ROM`
 when `-n` selects N-BASIC, before starting the core. This avoids silently running

@@ -30,6 +30,7 @@ static int dos_no_sound;
 int dos_pcm_zero;
 int dos_sb_filter;
 int dos_sb_44k;
+int dos_sb_8bit;
 static const T_CONFIG_TABLE options[] = {
     {300, "dosframes", X_INT, &frame_limit, 0, 36000, NULL, NULL},
     {301, "doscheck", X_FIX, &check_fixture, TRUE, 0, NULL, NULL},
@@ -45,6 +46,7 @@ static const T_CONFIG_TABLE options[] = {
     {311, "dospcmzero", X_FIX, &dos_pcm_zero, TRUE, 0, NULL, NULL},
     {312, "dossbfilter", X_FIX, &dos_sb_filter, TRUE, 0, NULL, NULL},
     {313, "dossb44k", X_FIX, &dos_sb_44k, TRUE, 0, NULL, NULL},
+    {314, "dossb8", X_FIX, &dos_sb_8bit, TRUE, 0, NULL, NULL},
     {0, NULL, X_INV, NULL, 0, 0, NULL, NULL}
 };
 
@@ -59,7 +61,8 @@ static void help(FILE *fp)
           "  -dosnosound           Disable emulated sound output.\n"
           "  -dospcmzero           Keep Sound Blaster active, but send digital silence.\n"
           "  -dossbfilter          Apply a gentle high-frequency audio roll-off.\n"
-          "  -dossb44k             Test 43,478 Hz 8-bit mono DSP playback.\n"
+          "  -dossb44k             Use 44,100 Hz (SB16) or 43,478 Hz (8-bit) output.\n"
+          "  -dossb8               Force 8-bit DSP output even on an SB16.\n"
           "  Ctrl+Q / Ctrl+Alt+Q    Emergency quit to DOS.\n"
           "  -dosdiskchk           Test mounted drive 1 (test image is modified).\n"
           "  -dosstatechk          Save/load emulator state (requires -doscheck).\n"

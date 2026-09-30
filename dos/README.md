@@ -686,7 +686,8 @@ follow the PC-88 layout. The key assignments mirror SDL2's
   - `AZTSB` after Windows 98 "Restart in MS-DOS mode": the user reports
     that `YS1HW.BAT` then played SB 8-bit mono. So `AZTSB` restores Sound
     Blaster mode from the Windows driver's WSS state on the physical card.
-  - The STOP test result was not yet reported.
+  - STOP: in N88-BASIC, `10 GOTO 10` then `RUN`, then ScrollLock or
+    Pause. The user reports `Break in 10`.
 
 #### DOSBox-X dynamic core: use `core=normal`
 

@@ -7,5 +7,6 @@ void dos_mouse_video_update_begin(void);
 void dos_mouse_video_update_end(void);
 int dos_graph_verify(void);
 int dos_graph_restored(void);
+void dos_graph_palette_report(void);
 unsigned long dos_key_count(void);
 #endif

@@ -15,11 +15,14 @@
 #include "snapshot.h"
 #include "device.h"
 
-int dos_vga;
+/* Interactive VGA is the default; -dosnovga and -dosframes N are for
+   bounded headless test runs. */
+int dos_vga = TRUE;
 int dos_key_log;
 int dos_mouse_log;
 extern int use_sound;
-static int frame_limit = 3;
+static int frame_limit = 0;
+extern int keyboard_type;
 static int check_fixture;
 static int check_video;
 static int check_disk;
@@ -37,6 +40,7 @@ static const T_CONFIG_TABLE options[] = {
     {300, "dosframes", X_INT, &frame_limit, 0, 36000, NULL, NULL},
     {301, "doscheck", X_FIX, &check_fixture, TRUE, 0, NULL, NULL},
     {302, "dosvga", X_FIX, &dos_vga, TRUE, 0, NULL, NULL},
+    {302, "dosnovga", X_FIX, &dos_vga, FALSE, 0, NULL, NULL},
     {303, "dosvideochk", X_FIX, &check_video, TRUE, 0, NULL, NULL},
     {304, "doskeylog", X_FIX, &dos_key_log, TRUE, 0, NULL, NULL},
     {305, "dosdiskchk", X_FIX, &check_disk, TRUE, 0, NULL, NULL},
@@ -53,14 +57,18 @@ static const T_CONFIG_TABLE options[] = {
     {315, "doswss", X_FIX, &dos_wss, TRUE, 0, NULL, OPT_SAVE},
     {315, "nodoswss", X_FIX, &dos_wss, FALSE, 0, NULL, OPT_SAVE},
     {316, "dosmono", X_FIX, &dos_mono, TRUE, 0, NULL, NULL},
+    /* Same meaning as the SDL2 port's -keyboard: 1 = JP106, 2 = US101. */
+    {317, "keyboard", X_INT, &keyboard_type, 1, 2, NULL, OPT_SAVE},
     {0, NULL, X_INV, NULL, 0, 0, NULL, NULL}
 };
 
 static void help(FILE *fp)
 {
     fputs("  DOS: Sound Blaster-compatible audio is optional; frame pacing enabled.\n"
-          "  -dosframes <0..36000>  Frame limit (default 3); 0 runs until quit.\n"
-          "  -dosvga               VGA 640x480, 16-color approximated palette.\n"
+          "  -dosframes <0..36000>  Frame limit for tests (default 0: run until quit).\n"
+          "  -dosvga / -dosnovga   VGA 640x480 display (default) / headless test run.\n"
+          "  -keyboard <1|2>       Extra keys for a JP106 (1, default) or US101 (2)\n"
+          "                        keyboard; saved in QUASI88.INI.\n"
           "  -dosvideochk          Verify VGA planes before restoring text mode.\n"
           "  -doskeylog            Log BIOS keyboard scan/ASCII codes to KEYS.LOG.\n"
           "  -dosmouselog          Log INT 33h availability and state to MOUSE.LOG.\n"
@@ -318,6 +326,7 @@ int main(int argc, char **argv)
     if (check_video) printf("DOS: VGA plane readback: %s\n", video_ok ? "PASS" : "FAIL");
     if (check_disk) printf("DOS: D88 image check: %s\n", disk_ok ? "PASS" : "FAIL");
     if (check_state) printf("DOS: state file: %s\n", file_state);
+    if (dos_vga) dos_graph_palette_report();
     if (dos_vga) printf("DOS: original video mode restored: %s; keys delivered: %lu\n",
                        dos_graph_restored() ? "PASS" : "FAIL", dos_key_count());
     printf("DOS: completed %d/%d frames; clean shutdown\n", frames, frame_limit);

@@ -592,6 +592,98 @@ DOSBox-X round trip (fresh folder, SB16, real ROMs):
 
 The existing `-ConfigTest` still passes.
 
+### `AZTSB.EXE` for `DOSSTART.BAT`
+
+`.\dos\build.ps1 -Target AztSb -WatcomRoot D:\watcom` builds
+`build-dos\AZTSB.EXE` from `dos/aztsb.c` (warnings treated as errors). It
+runs the `WSSTEST /SB` sequence without the diagnostics:
+
+1. Probe for the codec, using `Q88WSS` A or the candidate ports. If it
+   answers, set I2-I5 to `0Ch` and I6/I7 to `08h`.
+2. Send DSP `09h, 01h`, wait 20 ms, and reset the DSP.
+3. Start a single-cycle 8-bit transfer of silence on the `BLASTER` DMA
+   channel (default 1) and confirm the 8237 count moves. The transfer uses
+   a 4 KiB DOS buffer that does not cross a DMA page.
+
+It prints one line; `/V` adds the codec and DMA details. Errorlevel 0 means
+SB mode works, 1 means no DSP, and 2 means the DMA did not move. Intended
+use: `C:\...\AZTSB` in `C:\WINDOWS\DOSSTART.BAT`, so Windows 98 MS-DOS
+mode gets Sound Blaster sound.
+
+In DOSBox-X at 30,000 cycles, `sbtype=sbpro2` and `sb16` reported `Sound
+Blaster mode at 220` with errorlevel 0 and a moving DMA count. With
+`sbtype=none` it reported `no Sound Blaster DSP at 220` with errorlevel 1.
+The WSS-mode path runs only on the physical AZT2320, where this sequence
+worked as `WSSTEST /SB`; `AZTSB.EXE` itself is not yet tested there.
+
+### Interactive defaults, exact VGA colors, and extra keys
+
+**Defaults.** `QUASI88` now starts an interactive VGA session: `dos_vga`
+defaults on and the frame limit to 0. `-dosnovga` (option group 302,
+paired with `-dosvga`) and `-dosframes N` select bounded headless runs.
+`machtest.ps1` passes `-dosnovga` except in `-VgaTest`.
+
+**Colors.** Mode 12h has 16 DAC entries. `graph.c` now reprograms them from
+the core's color requests instead of using a fixed 8-color-plus-greys
+palette:
+
+- The frame buffer holds logical colors (up to 256). Each maps to one of
+  the 16 DAC entries.
+- The core's emulator palette arrives in groups of 16, or 136 with the
+  half-size blend colors (`screen/color.c` `emu_palette`). Its first 16
+  colors, the PC-88 graphics and text palettes, get exact entries first.
+- Menu colors (groups of 12 or 78) and blend colors use leftover entries,
+  else the nearest.
+- A palette change marks a deferred remap. The next `graph_update` loads
+  the DAC and redraws the whole frame, so VRAM and DAC always change
+  together.
+
+The first version reprogrammed the DAC immediately. A 600-frame Ys I run
+then failed `-dosvideochk` readback, while the committed build passed. The
+deferred remap fixed it. The exit log reports DAC entries in use, exact
+emulator colors, and palette changes that needed approximation.
+
+**Keys.** A new `-keyboard 1|2` option works like the SDL2 port's (1 = JP106,
+default; 2 = US101) and is saved in `QUASI88.INI`. Key positions still
+follow the PC-88 layout. The key assignments mirror SDL2's
+`remapping_win_106` and `remapping_win_101` tables:
+
+- **Both layouts:** ScrollLock → STOP, Pause → STOP, PrintScreen → COPY.
+  Pause has no release code, so it presses STOP and releases it four event
+  polls later.
+- **JP106:** ro (73h) → `_`; yen (7Dh) → `¥`, `|` with Shift; henkan (79h)
+  → HENKAN; muhenkan (7Bh) → KETTEI; Application (E0 5Dh) → ZENKAKU.
+  Hankaku/zenkaku (29h) and hiragana (70h) stay unmapped, as in SDL2.
+- **US101:** `` ` `` (29h) → `¥`/`|`; Right Ctrl → `_`.
+- Keypad `=` and `,` have no PC key and stay unmapped.
+
+2026-09-30 validation:
+
+- The Machine build has no warnings in the DOS sources.
+- Regression suite passes: synthetic, VGA (synthetic, and real ROMs at
+  12,000 cycles), state, snapshot, config, joystick, disk, and sound. The
+  headless runs use `-dosnovga`; both VGA runs report exact 16/16.
+- Ys I (OPNA) started with no VGA or frame options, which exercises the new
+  defaults. It passed readback at 600 and 1,200 frames with 16/16 exact
+  colors across 5-6 palette changes.
+- DOSBox-X `AUTOTYPE` sent scrolllock, pause, printscreen, jp_yen,
+  jp_bckslash, jp_henkan, jp_muhenkan, rwinmenu, grave, and rctrl.
+  `KEYS.LOG` showed the expected PC-88 keys for both `-keyboard 1` and
+  `-keyboard 2`.
+- Physical AZT2320 PC, user-reported 2026-09-30:
+  - `YS1NEW.BAT` (no `-dosvga` or `-dosframes`) started interactive VGA.
+    The user reports the colors look right. The log showed exact 16/16
+    across 6 palette changes, and WSS stereo ran 67.4 s at 99.8% of real
+    time with 0 resyncs.
+  - An SB 8-bit run reached 99.1% of real time with the same palette
+    report, so the palette changes did not slow emulation.
+  - Pressing what the user considered the yen key produced `]`. `]` is the
+    PC-88 key at scan 2Bh (the US backslash position; Japanese Windows
+    shows backslash as the yen sign). The JP106 yen key sends 7Dh. The user's
+    keyboard type and the scan code are still to be confirmed with
+    `-doskeylog`.
+  - The STOP test and `AZTSB` results were not yet reported.
+
 #### DOSBox-X dynamic core: use `core=normal`
 
 With `core=dynamic` or `core=auto`, DOSBox-X 2026.08.31 gives wrong

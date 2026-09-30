@@ -21,6 +21,13 @@ static int keyboard_irq_installed;
 static int pressed_keys[256];
 static int left_shift, right_shift, control, alt, caps_lock;
 static int extended_prefix, pause_bytes;
+/* Pause sends a make-only sequence (E1 1D 45 E1 9D C5). It is mapped to the
+   PC-88 STOP key, released after a few polls so the key scan sees it. */
+#define PAUSE_STOP_POLLS 4
+static int pause_stop_polls;
+/* Key positions follow the PC-88 (JIS) layout, as in the SDL2 port;
+   -keyboard selects how the extra keys map: 1 = Japanese 106, 2 = US 101. */
+int keyboard_type = 1;
 static int bios_pressed_key, bios_remaining, bios_shift, bios_control;
 static int mouse_available;
 static int gameport_joystick;
@@ -323,8 +330,9 @@ static int map_keyboard_scan(unsigned int scan, int extended)
     if (extended) {
         switch (scan) {
         case 0x1c: return KEY88_RETURNR;
-        case 0x1d: return KEY88_CTRL;
+        case 0x1d: return keyboard_type == 2 ? KEY88_UNDERSCORE : KEY88_CTRL;
         case 0x35: return KEY88_KP_DIVIDE;
+        case 0x37: return KEY88_COPY;          /* PrintScreen */
         case 0x38: return KEY88_KANA;
         case 0x47: return KEY88_HOME;
         case 0x48: return KEY88_UP;
@@ -337,6 +345,7 @@ static int map_keyboard_scan(unsigned int scan, int extended)
         case 0x52: return KEY88_INS;
         case 0x53: return KEY88_DEL;
         case 0x5b: return KEY88_SYS_MENU;
+        case 0x5d: return keyboard_type == 2 ? 0 : KEY88_ZENKAKU;   /* Application */
         default: return 0;
         }
     }
@@ -355,6 +364,9 @@ static int map_keyboard_scan(unsigned int scan, int extended)
     case 0x0c: return shifted ? KEY88_EQUAL : KEY88_MINUS;
     case 0x0d: return shifted ? KEY88_TILDE : KEY88_CARET;
     case 0x0e: return KEY88_BS;
+    case 0x29:                                 /* JP: hankaku/zenkaku; US: ` */
+        if (keyboard_type == 2) return shifted ? KEY88_BAR : KEY88_YEN;
+        return 0;
     case 0x0f: return KEY88_TAB;
     case 0x1a: return shifted ? KEY88_BACKQUOTE : KEY88_AT;
     case 0x1b: return shifted ? KEY88_BRACELEFT : KEY88_BRACKETLEFT;
@@ -381,6 +393,7 @@ static int map_keyboard_scan(unsigned int scan, int extended)
     case 0x42: return KEY88_F8;
     case 0x43: return KEY88_F9;
     case 0x44: return KEY88_F10;
+    case 0x46: return KEY88_STOP;              /* ScrollLock */
     case 0x47: return KEY88_KP_7;
     case 0x48: return KEY88_KP_8;
     case 0x49: return KEY88_KP_9;
@@ -396,6 +409,14 @@ static int map_keyboard_scan(unsigned int scan, int extended)
     case 0x53: return KEY88_KP_PERIOD;
     case 0x57: return KEY88_SYS_STATUS;
     case 0x58: return KEY88_SYS_MENU;
+    /* Japanese 106-key extras; hiragana/katakana (70h) stays unmapped, as
+       in the SDL2 port. */
+    case 0x73: return keyboard_type == 2 ? 0 : KEY88_UNDERSCORE;      /* ro */
+    case 0x79: return keyboard_type == 2 ? 0 : KEY88_HENKAN;          /* henkan */
+    case 0x7b: return keyboard_type == 2 ? 0 : KEY88_KETTEI;          /* muhenkan */
+    case 0x7d:                                                        /* yen */
+        if (keyboard_type == 2) return 0;
+        return shifted ? KEY88_BAR : KEY88_YEN;
     default: return 0;
     }
 }
@@ -404,7 +425,17 @@ static void process_keyboard_scan(unsigned char scan)
     unsigned int code, index;
     int down, keycode;
     if (pause_bytes) { --pause_bytes; return; }
-    if (scan == 0xe1) { pause_bytes = 5; extended_prefix = 0; return; }
+    if (scan == 0xe1) {
+        pause_bytes = 5;
+        extended_prefix = 0;
+        if (!pause_stop_polls) {
+            quasi88_key(KEY88_STOP, TRUE);
+            ++delivered;
+            log_key(0x45, 2, TRUE, KEY88_STOP);
+        }
+        pause_stop_polls = PAUSE_STOP_POLLS;
+        return;
+    }
     if (scan == 0xe0) { extended_prefix = 1; return; }
     down = (scan & 0x80) == 0;
     code = scan & 0x7f;
@@ -569,6 +600,10 @@ static void poll_mouse(void)
 }
 void event_update(void)
 {
+    if (pause_stop_polls && --pause_stop_polls == 0) {
+        quasi88_key(KEY88_STOP, FALSE);
+        log_key(0x45, 2, FALSE, KEY88_STOP);
+    }
     poll_keyboard();
     poll_mouse();
     poll_gameport();

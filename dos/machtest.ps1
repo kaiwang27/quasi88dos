@@ -55,7 +55,9 @@ if ($RomDirectory) {
         # Model-specific input name exceeds DOS 8.3; only the isolated copy is renamed.
         Copy-Item -LiteralPath (Join-Path $Mk2srDirectory 'mk2sr_n88.rom') -Destination (Join-Path $testDir 'ROM\N88.ROM')
     }
-    $checkOption = if ($VgaTest) { '-dosvga -dosvideochk -dosmouselog' } else { '' }
+    # QUASI88 now starts interactive VGA by default; bounded tests stay
+    # headless unless -VgaTest checks the VGA path.
+    $checkOption = if ($VgaTest) { '-dosvga -dosvideochk -dosmouselog' } else { '-dosnovga' }
 } else {
     # Tiny original programs: write a RAM marker, then loop at address 0005.
     $mainRom = New-Object byte[] 32768
@@ -67,7 +69,7 @@ if ($RomDirectory) {
     # Default scheduling switches CPUs on PIO; these simple fixtures have no
     # PIO handshake, so use the existing interleaved CPU mode for this test.
     $checkOption = '-doscheck -cpu 2'
-    if ($VgaTest) { $checkOption += ' -dosvga -dosvideochk -dosmouselog' }
+    $checkOption += $(if ($VgaTest) { ' -dosvga -dosvideochk -dosmouselog' } else { ' -dosnovga' })
     if ($StateTest) { $checkOption += ' -dosstatechk' }
     if ($SnapshotTest) { $checkOption += ' -dossnapchk' }
 if ($ConfigTest) {

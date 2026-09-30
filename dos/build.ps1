@@ -1,6 +1,6 @@
 param(
     [string]$WatcomRoot = $env:WATCOM,
-    [ValidateSet('Hello', 'PortTest', 'WaitTest', 'WssTest', 'Machine')]
+    [ValidateSet('Hello', 'PortTest', 'WaitTest', 'WssTest', 'AztSb', 'Machine')]
     [string]$Target = 'Hello'
 )
 
@@ -85,6 +85,18 @@ try {
         & $compilerPath '-y' '-bt=dos' '-l=causeway' '-fe=Q88TEST.EXE' '-fm=Q88TEST.MAP' 'PORTTEST.OBJ' 'FILEOP.OBJ' 'Z80.OBJ'
         if ($LASTEXITCODE -ne 0) { throw 'DOS link failed' }
         Write-Host "Built $outputDir\Q88TEST.EXE"
+    } elseif ($Target -eq 'AztSb') {
+        # AZTSB: returns an AZT2320 to Sound Blaster mode (for DOSSTART.BAT).
+        $repoRoot = Split-Path $PSScriptRoot -Parent
+        $includes = @('src/sysdepend/dos', 'src/osdepend/dos', 'src', 'src/pc88', 'src/screen', 'src/screen/func', 'src/screen/func/macro', 'src/tk', 'src/tk/q8tk', 'src/tk/q8tk/q8tk', 'src/ui', 'src/ui/menu', 'src/mon', 'src/snddrv', 'src/sysdepend', 'src/osdepend') |
+            ForEach-Object { '-i=' + (Join-Path $repoRoot $_) }
+        & $compilerPath '-y' '-c' '-bt=dos' '-3r' '-mf' '-w4' '-we' @includes '-fo=AZTSB.OBJ' (Join-Path $PSScriptRoot 'aztsb.c')
+        if ($LASTEXITCODE -ne 0) { throw 'DOS AZTSB compile failed' }
+        & $compilerPath '-y' '-c' '-bt=dos' '-3r' '-mf' '-w4' '-we' @includes '-fo=AZTWAIT.OBJ' (Join-Path $repoRoot 'src/sysdepend/dos/wait.c')
+        if ($LASTEXITCODE -ne 0) { throw 'DOS wait backend compile failed' }
+        & $compilerPath '-y' '-bt=dos' '-l=causeway' '-fe=AZTSB.EXE' '-fm=AZTSB.MAP' 'AZTSB.OBJ' 'AZTWAIT.OBJ'
+        if ($LASTEXITCODE -ne 0) { throw 'DOS AZTSB link failed' }
+        Write-Host "Built $outputDir\AZTSB.EXE"
     } elseif ($Target -eq 'WssTest') {
         # Stand-alone WSS codec probe and tone test; shares only the PIT timer.
         $repoRoot = Split-Path $PSScriptRoot -Parent

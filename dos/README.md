@@ -163,8 +163,8 @@ The release folder contains `QUASI88.EXE`, `AZTSB.EXE`, `WSSTEST.EXE`,
 `README.TXT`, `LICENSE.TXT`, `MAME.TXT`, and an empty `ROM` directory. All
 names are DOS 8.3 names.
 
-The desktop (SDL2/CMake) build is separate and unchanged; see the
-[main README](../README.md).
+The desktop (SDL2/CMake) build is separate and unchanged from upstream; for
+it, see [bubio/QUASI88](https://github.com/bubio/QUASI88).
 
 ## Testing
 

@@ -1,12 +1,10 @@
-# QUASI88
+# QUASI88 for MS-DOS
 
 <p align="center">
   <img src="AppIcon.png" alt="QUASI88" width="128" height="128">
 </p>
 
-QUASI88 is a powerful and highly compatible PC-8801 emulator, originally created by Shozo Fukunaga. This version is a multi-platform port based on SDL2, providing a modern experience across macOS, Windows, and Linux.
-
-> **This repository ([kaiwang27/quasi88dos](https://github.com/kaiwang27/quasi88dos)) is a fork of [bubio/QUASI88](https://github.com/bubio/QUASI88) that adds an MS-DOS port.** The DOS port is documented in [dos/README.md](dos/README.md). The desktop (SDL2) code is unchanged from upstream. Pre-built desktop packages are published by the upstream project; this repository's releases contain the MS-DOS build.
+An MS-DOS port of QUASI88, the PC-8801 emulator originally created by Shozo Fukunaga. It runs on real retro PCs and in DOSBox-X.
 
 <p align="center">
   <a href="https://github.com/kaiwang27/quasi88dos/releases/latest">
@@ -15,112 +13,85 @@ QUASI88 is a powerful and highly compatible PC-8801 emulator, originally created
   <a href="https://github.com/kaiwang27/quasi88dos/blob/main/LICENSE">
     <img src="https://img.shields.io/github/license/kaiwang27/quasi88dos" alt="License">
   </a>
-  <a href="https://github.com/kaiwang27/quasi88dos/releases/latest">
-    <img src="https://img.shields.io/github/downloads/kaiwang27/quasi88dos/total.svg" alt="Downloads">
-  </a>
 </p>
 
-QUASI88 allows you to run software for the classic Japanese 8-bit computer on modern systems. It accurately reproduces the PC-8801mkIISR and later models, with support for various features like sound (including fmgen), graphics, and peripherals.
-
-<p align="center">
-  <img src="doc/screenshot.png" alt="QUASI88 Screenshot">
-</p>
+> This repository is a fork of [bubio/QUASI88](https://github.com/bubio/QUASI88), the SDL2 port for macOS, Windows, and Linux. It adds the MS-DOS port. For the desktop versions, use the upstream project.
 
 ## Features
 
-QUASI88 emulates various components of the PC-8801:
+*   **PC-8801 emulation**: the QUASI88 core, unchanged. Z80 main and sub CPUs, PC-8801mkIISR-class memory, text and graphics VRAM, kanji ROMs, D88 disk images, save states, screenshots, and the built-in menu.
+*   **Display**: VGA 640x480 using the PC-8801's own palette, or an optional VESA 640x480 256-color mode.
+*   **Sound**: YM2203 (OPN), YM2608 (OPNA), and BEEP through the MAME/XMAME sound core.
+    *   Sound Blaster 16: 16-bit stereo.
+    *   Older Sound Blasters and compatibles: 8-bit mono.
+    *   Aztech AZT2320: 16-bit stereo through its Windows Sound System codec.
+*   **Input**: keyboard, mouse (with a DOS mouse driver), one game-port joystick.
+*   **Self-contained**: a 32-bit DOS program with the CauseWay DOS extender built in.
 
-*   **Z80 CPU**: Both main and sub CPUs.
-*   **Memory**: PC-8801mkIISR equivalent, extended RAM, dictionary ROM.
-*   **Display**: Text VRAM, VRAM, palette, ALU. Supports 640x200 (8 colors) and 640x400 (monochrome) modes.
-*   **Kanji ROM**: Level 1 and Level 2 Kanji ROM.
-*   **FDC/FDD**: Supports D88 format disk images.
-*   **Input**: Keyboard, Mouse, Joystick.
-*   **Sound**: YM2203, YM2608, BEEP sound. Utilizes MAME/XMAME sound drivers and fmgen.
-*   **Tape**: Load/save functionality (CMT/T88 format).
-*   **Others**: Printer, RS232C (output to file), PCG-8100.
+## Requirements
 
-## Supported Platforms
+*   A 386 or better CPU. It was developed and tested on a Celeron with an Intel i740; slower CPUs have not been tested.
+*   VGA. A VESA BIOS is optional.
+*   MS-DOS, or Windows 95/98 started with F8 > "Command prompt only".
+*   Your own PC-8801 ROM images and disk images. None are included.
 
-*   **macOS**: Universal Binary (Apple Silicon & Intel), Standalone `.dmg`.
-*   **Windows**: x64, x86, and ARM64. Portable `.zip` packages.
-*   **Linux**: x86_64 and arm64. **AppImage** (Standalone), `.deb`, and `.rpm`.
-*   **Raspberry Pi**: armhf (32-bit) `.deb` packages.
-*   **MS-DOS**: a 32-bit DOS build for real retro PCs and DOSBox-X, with VGA/VESA display and Sound Blaster / WSS sound. See [dos/README.md](dos/README.md).
+## Getting started
 
-## Getting Started
+1.  Download `Q88DOS.ZIP` from the [Releases](https://github.com/kaiwang27/quasi88dos/releases) page, or [build it](#building).
+2.  Extract it to a directory on the DOS PC, for example `C:\Q88`.
+3.  Put your ROM images in the `ROM` directory. `N88.ROM` is required.
+4.  Run it:
 
-### Installation (Pre-built Releases)
+    ```
+    QUASI88                        start N88-BASIC
+    QUASI88 -diskimage GAME.D88    boot a disk image
+    ```
 
-The desktop packages below are published by the upstream project: download the latest version for your platform from the [upstream Releases](https://github.com/bubio/QUASI88/releases) page. The MS-DOS build (`Q88DOS.ZIP`) is published on [this repository's Releases](https://github.com/kaiwang27/quasi88dos/releases) page.
+| Key | Action |
+|---|---|
+| F12 | Menu: disks, settings, save states, reset, quit |
+| F11 | Show or hide the toolbar and status line |
+| Ctrl+Q | Quit to DOS |
+| ScrollLock or Pause | STOP |
 
-*   **MS-DOS**: Extract `Q88DOS.ZIP` to a directory on the DOS PC, put your ROM images in its `ROM` directory, and run `QUASI88`. See [dos/README.md](dos/README.md).
-*   **Windows**: Just extract the `.zip` file and double-click **`QUASI88.exe`**. No installation or command line required!
-*   **macOS**: Open the `.dmg` and copy `QUASI88.app` to your Applications folder.
-*   **Linux**: 
-    *   **AppImage**: Make the `.AppImage` file executable (`chmod +x`) and run it.
-    *   **DEB/RPM**: Use your package manager (e.g., `sudo apt install ./QUASI88.deb`).
+File names must be DOS 8.3 names. `README.TXT` in the release is the full user guide.
 
-### Building from Source
+## Documentation
 
-QUASI88 uses CMake for its build system.
+*   **[dos/README.md](dos/README.md)**: options, sound and video setup, keyboard mapping, building, testing, and limits.
+*   **[dos/DEVLOG.md](dos/DEVLOG.md)**: development log with test records and hardware findings.
+*   **[doc/manual.txt](doc/manual.txt)** and **[doc/faq.txt](doc/faq.txt)**: the original QUASI88 manual and FAQ (Japanese).
 
-**Prerequisites:**
-*   **CMake** (version 3.10 or later)
-*   **SDL2 development library**
+## Building
 
-**Install Dependencies:**
-*   **macOS**: `brew install cmake sdl2`
-*   **Linux**: `sudo apt install cmake libsdl2-dev`
-*   **Windows**: Use `vcpkg install sdl2:x64-windows`
+You need Windows, PowerShell, and [Open Watcom v2](https://github.com/open-watcom/open-watcom-v2).
 
-**Build Commands:**
-```bash
+```powershell
 git clone https://github.com/kaiwang27/quasi88dos.git
 cd quasi88dos
-cmake -S. -Bbuild -DCMAKE_BUILD_TYPE=Release
-cmake --build build
+
+# Build QUASI88.EXE into build-dos\
+.\dos\build.ps1 -WatcomRoot D:\watcom
+
+# Build everything and assemble build-dos\dist\Q88DOS\ and Q88DOS.ZIP
+.\dos\package.ps1 -WatcomRoot D:\watcom
 ```
 
-The MS-DOS build uses Open Watcom v2 instead of CMake and SDL2; see [dos/README.md](dos/README.md#building).
+See [dos/README.md](dos/README.md#building) for the build targets and the DOSBox-X regression tests.
 
-## Usage
+## Desktop versions
 
-### ROM Images
-
-QUASI88 requires PC-8801 BIOS ROM images (e.g., `N88.ROM`, `N88SUB.ROM`) to function. Place them in the default ROM directory for your platform. Refer to `doc/manual.txt` for a full list of required files.
-
-### Default Directories
-
-| Platform | BIOS ROMs (`ROM_DIR`) | Config Files (`G_CFG_DIR`) | Disk Images (`DISK_DIR`) |
-| :--- | :--- | :--- | :--- |
-| **macOS** | `~/Library/Application Support/quasi88/rom/` | `~/Library/Application Support/quasi88/` | `~/` |
-| **Linux** | `~/.local/share/quasi88/rom/` | `~/.config/quasi88/` | `~/` |
-| **Windows** | `.\ROM\` (relative to EXE) | `.\` (relative to EXE) | `.\DISK\` |
-
-### Key Operations
-
-*   **F12**: Enter **Menu Mode** (Settings, Disk management, etc.)
-*   **F11**: Toggle toolbar and status display.
-*   **STOP**: `Pause` / `ScrollLock`
-*   **HOME CLR**: `Home`
-*   **HELP**: `End`
-
-## Troubleshooting
-
-If you encounter issues, please check the [FAQ](doc/faq.txt) or the [Manual](doc/manual.txt). Common issues include:
-*   **Missing ROMs**: Ensure BIOS files are in the correct directory.
-*   **macOS Permissions**: Since the app is not signed, you may need to run `xattr -cr /Applications/QUASI88.app` if macOS prevents it from opening.
+The source tree still contains the SDL2/CMake desktop build, unchanged from upstream. This fork does not publish desktop packages. For macOS, Windows, Linux, and Raspberry Pi builds and their instructions, see [bubio/QUASI88](https://github.com/bubio/QUASI88).
 
 ## License
 
-This project is distributed under the terms of its original license (Revised BSD-style). See the `LICENSE` file for details. It incorporates code from SDL2 (Zlib), MAME/XMAME, and fmgen.
+QUASI88 is distributed under the BSD 3-Clause license; see [LICENSE](LICENSE). The MS-DOS port is copyright (c) 2026 Kai Wang, under the same license.
 
-The MS-DOS port is copyright (c) 2026 Kai Wang and is distributed under the same BSD 3-Clause license. The MAME/XMAME sound code has its own license (`src/snddrv/xmame/license.txt`), which does not permit selling it or using it commercially and requires complete source code with modified versions.
+The sound emulation comes from MAME/XMAME under its own license ([src/snddrv/xmame/license.txt](src/snddrv/xmame/license.txt)), which does not permit selling it or using it commercially and requires complete source code with modified versions. The source tree also includes fmgen, which the DOS build does not use.
 
 ## Acknowledgements
 
-Original creator: **Shozo Fukunaga**.
-SDL2 port: **Bubio** ([bubio/QUASI88](https://github.com/bubio/QUASI88)).
-MS-DOS port: **Kai Wang**.
-Special thanks to the contributors of SDL2, MAME, and fmgen.
+*   Original QUASI88: **Shozo Fukunaga**.
+*   SDL2 port: **Bubio** ([bubio/QUASI88](https://github.com/bubio/QUASI88)).
+*   MS-DOS port: **Kai Wang**.
+*   Thanks to the contributors of MAME, fmgen, Open Watcom, CauseWay, and DOSBox-X.

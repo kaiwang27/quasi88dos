@@ -18,6 +18,7 @@
 /* Interactive VGA is the default; -dosnovga and -dosframes N are for
    bounded headless test runs. */
 int dos_vga = TRUE;
+int dos_vesa;
 int dos_key_log;
 int dos_mouse_log;
 extern int use_sound;
@@ -59,6 +60,9 @@ static const T_CONFIG_TABLE options[] = {
     {316, "dosmono", X_FIX, &dos_mono, TRUE, 0, NULL, NULL},
     /* Same meaning as the SDL2 port's -keyboard: 1 = JP106, 2 = US101. */
     {317, "keyboard", X_INT, &keyboard_type, 1, 2, NULL, OPT_SAVE},
+    /* Saved: VESA support depends on the video card. */
+    {318, "dosvesa", X_FIX, &dos_vesa, TRUE, 0, NULL, OPT_SAVE},
+    {318, "nodosvesa", X_FIX, &dos_vesa, FALSE, 0, NULL, OPT_SAVE},
     {0, NULL, X_INV, NULL, 0, 0, NULL, NULL}
 };
 
@@ -67,6 +71,8 @@ static void help(FILE *fp)
     fputs("  DOS: Sound Blaster-compatible audio is optional; frame pacing enabled.\n"
           "  -dosframes <0..36000>  Frame limit for tests (default 0: run until quit).\n"
           "  -dosvga / -dosnovga   VGA 640x480 display (default) / headless test run.\n"
+          "  -dosvesa / -nodosvesa VESA 640x480 256 colors (falls back to VGA mode\n"
+          "                        12h); saved in QUASI88.INI.\n"
           "  -keyboard <1|2>       Extra keys for a JP106 (1, default) or US101 (2)\n"
           "                        keyboard; saved in QUASI88.INI.\n"
           "  -dosvideochk          Verify VGA planes before restoring text mode.\n"

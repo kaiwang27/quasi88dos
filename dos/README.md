@@ -689,6 +689,69 @@ follow the PC-88 layout. The key assignments mirror SDL2's
   - STOP: in N88-BASIC, `10 GOTO 10` then `RUN`, then ScrollLock or
     Pause. The user reports `Break in 10`.
 
+### VESA 640x480 256-color option (`-dosvesa`)
+
+`-dosvesa`, paired with `-nodosvesa` in option group 318 and saved in
+`QUASI88.INI`, selects a VESA mode instead of mode 12h.
+
+**Mode selection:**
+
+- `vbe_find_mode()` calls VBE 4F00h/4F01h through DPMI 0300h, with a 1 KiB
+  DOS buffer. The mode info goes to offset 512 so it cannot overwrite the
+  VBE info block, which may hold the mode list.
+- It tries mode 101h, then the BIOS mode list, for a mode that is
+  640x480, 8 bpp packed pixel, supported, color graphics, VGA-compatible,
+  and windowed, with a writable window A.
+- Any failure prints the reason and falls back to mode 12h.
+
+**Drawing:**
+
+- Updates copy frame-buffer rows through window A. Bank changes use VBE
+  4F05h, tracked to skip redundant calls.
+- The logical color is the DAC index: all used logical colors are loaded
+  into the DAC, with 254 and 255 reserved for the pointer. A palette change
+  only reloads the DAC.
+
+**Mouse pointer:** QUASI88 draws a 12x19 arrow. It is erased by copying
+frame-buffer pixels back, and redrawn after overlapping updates and on
+mouse moves. The INT 33h driver's pointer stays hidden. The mouse code now
+sets the driver range to 640x480 and centers the pointer in both modes.
+
+**Checks:** `-dosvideochk` reads VRAM back when window A is readable,
+excluding the pointer. The exit log reports `VESA palette: N logical
+colors, all exact`.
+
+DOSBox-X (normal core, 60,000 fixed cycles, Ys I, `-sd2`):
+
+- `machine=svga_s3`: mode 101h with a 64 KiB window and granularity, pitch
+  640. Readback passed at 300 and 600 frames, and 94 logical colors were
+  exact.
+- With `-nowait`, emulation reached 24.8% of real time in mode 12h and
+  38.3% in VESA: about 1.5x faster overall, from the cheaper redraw.
+- `machine=vgaonly`: `VESA unavailable: no VBE BIOS`, then mode 12h with
+  readback passing.
+- The mode 12h `-VgaTest` regression still passes.
+
+Physical i740 PC, user-reported 2026-09-30:
+
+- `-dosvesa` selected mode 101h (64 KiB window and granularity, pitch 640)
+  with 94 logical colors exact. The user reports the pointer looked fine.
+  Normal play with WSS stereo ran 79.4 s at 99.6% of real time with 0
+  resyncs.
+- Speed with `-nowait`, Ys I, 1,500 frames, SB 8-bit. The first VESA build
+  copied rows one byte at a time and was slower than mode 12h. Writes to
+  VRAM cross the bus, and VESA wrote twice as many bytes as the planar
+  path. Copying rows with `memcpy` (32-bit moves) made VESA the faster
+  mode:
+
+  | Build | Mode 12h | VESA |
+  |---|---|---|
+  | Byte-wise VESA copy | 251.7% | 222.2% |
+  | `memcpy` VESA copy | 244.9% | 288.3% |
+
+- In DOSBox-X the same change moved VESA from 38.3% to 41.4% of real time
+  (mode 12h 24.8%), with readback still passing.
+
 #### DOSBox-X dynamic core: use `core=normal`
 
 With `core=dynamic` or `core=auto`, DOSBox-X 2026.08.31 gives wrong

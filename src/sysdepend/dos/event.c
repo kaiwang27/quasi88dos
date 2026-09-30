@@ -64,7 +64,7 @@ unsigned long dos_key_count(void) { return delivered; }
 void dos_mouse_video_update_begin(void)
 {
     union REGS regs;
-    if (!mouse_available) return;
+    if (!mouse_available || dos_graph_vesa_active()) return;
     memset(&regs, 0, sizeof(regs));
     regs.w.ax = 2;
     int386(0x33, &regs, &regs);
@@ -72,7 +72,7 @@ void dos_mouse_video_update_begin(void)
 void dos_mouse_video_update_end(void)
 {
     union REGS regs;
-    if (!mouse_available) return;
+    if (!mouse_available || dos_graph_vesa_active()) return;
     memset(&regs, 0, sizeof(regs));
     regs.w.ax = 1;
     int386(0x33, &regs, &regs);
@@ -262,9 +262,28 @@ void event_init(void)
         int386(0x33, &regs, &regs);
         if (regs.w.ax == 0xffff) {
             mouse_available = TRUE;
+            /* Pin the coordinate range: after a VESA mode set some drivers
+               assume a different screen size. */
             memset(&regs, 0, sizeof(regs));
-            regs.w.ax = 1;
+            regs.w.ax = 7;
+            regs.w.dx = 639;
             int386(0x33, &regs, &regs);
+            memset(&regs, 0, sizeof(regs));
+            regs.w.ax = 8;
+            regs.w.dx = 479;
+            int386(0x33, &regs, &regs);
+            memset(&regs, 0, sizeof(regs));
+            regs.w.ax = 4;                  /* start at the screen center */
+            regs.w.cx = 320;
+            regs.w.dx = 240;
+            int386(0x33, &regs, &regs);
+            if (dos_graph_vesa_active()) {
+                dos_graph_mouse_moved(320, 240);   /* QUASI88 draws the pointer */
+            } else {
+                memset(&regs, 0, sizeof(regs));
+                regs.w.ax = 1;
+                int386(0x33, &regs, &regs);
+            }
         }
     }
     gameport_joystick = probe_gameport();
@@ -589,6 +608,7 @@ static void poll_mouse(void)
     changed = mouse_x != last_mouse_x || mouse_y != last_mouse_y || buttons != mouse_buttons;
     last_mouse_x = mouse_x;
     last_mouse_y = mouse_y;
+    dos_graph_mouse_moved(mouse_x, mouse_y);
     quasi88_mouse_moved_abs(mouse_x, mouse_y);
     for (i = 0; i < 3; ++i) {
         if (((buttons ^ mouse_buttons) & (1U << i)) != 0) {

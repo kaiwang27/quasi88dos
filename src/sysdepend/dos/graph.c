@@ -1,6 +1,8 @@
-/* VGA mode 12h, planar write mode 0. Headless RGB565 path retained.
- * The frame buffer holds logical colors (one byte per pixel); each maps to
- * one of the 16 DAC entries, which are reprogrammed as the palette changes.
+/* VGA mode 12h, planar write mode 0, or with -dosvesa a VESA 640x480
+ * 256-color mode (VBE, banked window). Headless RGB565 path retained.
+ * The frame buffer holds logical colors (one byte per pixel). In mode 12h
+ * each maps to one of the 16 DAC entries, which are reprogrammed as the
+ * palette changes; in VESA mode the logical color is the DAC entry.
  * CauseWay flat model maps conventional memory at its linear address
  * (installed cw.pdf, "Using the flat memory model"). VGA register layout:
  * IBM VGA/XGA Technical Reference, May 1992, sections 2-51 and 2-84.
@@ -42,6 +44,28 @@ static unsigned long palette_rebuilds, palette_inexact_rebuilds;
 static int palette_last_exact, palette_last_total;
 static volatile unsigned char *vram = (volatile unsigned char *)0xa0000;
 
+/* VESA state. Logical colors 254 and 255 are reserved for the pointer,
+   which QUASI88 draws itself because DOS mouse drivers often cannot draw
+   one in VESA modes. */
+#define CURSOR_BLACK 254
+#define CURSOR_WHITE 255
+#define CURSOR_W 12
+#define CURSOR_H 19
+static int vesa_active;
+static int vesa_used;                 /* for the exit report */
+static unsigned vesa_mode, vesa_pitch, vesa_bank = 0xffffU;
+static unsigned long vesa_granularity, vesa_window_size;
+static volatile unsigned char *vesa_window;
+static int vesa_readable;
+static int cursor_x = -1, cursor_y = -1, cursor_shown;
+static const char *const cursor_shape[CURSOR_H] = {
+    "B...........", "BB..........", "BWB.........", "BWWB........",
+    "BWWWB.......", "BWWWWB......", "BWWWWWB.....", "BWWWWWWB....",
+    "BWWWWWWWB...", "BWWWWWWWWB..", "BWWWWWWWWWB.", "BWWWWWWBBBBB",
+    "BWWWBWWB....", "BWWBBWWB....", "BWB..BWWB...", "BB...BWWB...",
+    "B.....BWWB..", "......BWWB..", ".......BB..."
+};
+
 static int video_mode(void)
 {
     union REGS r;
@@ -80,6 +104,19 @@ static void program_dac(void)
 {
     int i;
     if (!active) return;
+    if (vesa_active) {
+        outp(0x3c8, 0);
+        for (i = 0; i < LOGICAL_COLORS; ++i) {
+            unsigned char r = logical[i].r, g = logical[i].g, b = logical[i].b;
+            if (i == CURSOR_BLACK) r = g = b = 0;
+            else if (i == CURSOR_WHITE) r = g = b = 255;
+            else if (!logical[i].used) r = g = b = 0;
+            outp(0x3c9, r >> 2);
+            outp(0x3c9, g >> 2);
+            outp(0x3c9, b >> 2);
+        }
+        return;
+    }
     outp(0x3c8, 0);
     for (i = 0; i < dac_count; ++i) {
         outp(0x3c9, dac[i][0] >> 2);
@@ -139,10 +176,206 @@ static void rebuild_dac(void)
 
 void dos_graph_palette_report(void)
 {
+    if (vesa_used) {
+        int i, used = 0;
+        for (i = 0; i < LOGICAL_COLORS; ++i) used += logical[i].used;
+        printf("DOS: VESA palette: %d logical colors, all exact; %lu palette changes\n",
+               used, palette_rebuilds);
+        return;
+    }
     printf("DOS: VGA palette: %d of 16 DAC entries in use; emulator colors exact %d/%d;"
            " %lu of %lu palette changes approximated emulator colors\n",
            dac_count, palette_last_exact, palette_last_total,
            palette_inexact_rebuilds, palette_rebuilds);
+}
+
+/* ---- VESA BIOS Extension ---- */
+
+/* DPMI 0300h real-mode call structure. */
+typedef struct {
+    unsigned long edi, esi, ebp, reserved, ebx, edx, ecx, eax;
+    unsigned short flags, es, ds, fs, gs, ip, cs, sp, ss;
+} RM_REGS;
+
+/* Call INT 10h in real mode; VBE 4F00h/4F01h need a real-mode buffer. */
+static int vbe_call(RM_REGS *rm)
+{
+    union REGS r;
+    struct SREGS sr;
+    memset(&r, 0, sizeof(r));
+    segread(&sr);
+    sr.es = sr.ds;
+    r.x.eax = 0x0300;
+    r.x.ebx = 0x0010;
+    r.x.ecx = 0;
+    r.x.edi = (unsigned)rm;
+    int386x(0x31, &r, &r, &sr);
+    return !r.x.cflag && (rm->eax & 0xffffUL) == 0x004f;
+}
+
+static unsigned read16(const unsigned char *p) { return p[0] | (p[1] << 8); }
+
+/* Check one mode: 640x480, 8 bits per pixel, packed pixel, supported,
+   color graphics, VGA compatible (so the DAC ports and a window at
+   A000h work), windowed access, and a writable window A. */
+static int vbe_mode_usable(unsigned mode, unsigned segment, unsigned offset,
+                           const unsigned char *info_block)
+{
+    RM_REGS rm;
+    unsigned attributes;
+    memset(&rm, 0, sizeof(rm));
+    rm.eax = 0x4f01;
+    rm.ecx = mode;
+    rm.es = (unsigned short)segment;
+    rm.edi = offset;
+    if (!vbe_call(&rm)) return FALSE;
+    attributes = read16(info_block);
+    if ((attributes & 0x19) != 0x19 || (attributes & 0x60)) return FALSE;
+    if (read16(info_block + 18) != 640 || read16(info_block + 20) != 480 ||
+        info_block[25] != 8 || info_block[27] != 4) return FALSE;
+    if ((info_block[2] & 0x05) != 0x05) return FALSE;       /* window A writable */
+    if (!read16(info_block + 4) || !read16(info_block + 6)) return FALSE;
+    vesa_mode = mode;
+    vesa_granularity = (unsigned long)read16(info_block + 4) * 1024UL;
+    vesa_window_size = (unsigned long)read16(info_block + 6) * 1024UL;
+    vesa_window = (volatile unsigned char *)((unsigned long)read16(info_block + 8) << 4);
+    vesa_readable = (info_block[2] & 0x02) != 0;
+    vesa_pitch = read16(info_block + 16);
+    return vesa_window != NULL && vesa_pitch >= 640;
+}
+
+/* Find a usable 640x480x256 mode: 101h first, then the BIOS mode list.
+   Prints the reason when none is found. */
+static int vbe_find_mode(void)
+{
+    union REGS r;
+    RM_REGS rm;
+    unsigned segment, selector, i;
+    unsigned char *block;
+    int found = FALSE;
+    memset(&r, 0, sizeof(r));
+    r.x.eax = 0x0100;                       /* DPMI allocate DOS memory */
+    r.x.ebx = 64;                           /* 1 KiB for VBE info blocks */
+    int386(0x31, &r, &r);
+    if (r.x.cflag) {
+        puts("DOS: VESA unavailable: no DOS memory for VBE calls");
+        return FALSE;
+    }
+    segment = r.w.ax;
+    selector = r.w.dx;
+    block = (unsigned char *)((unsigned long)segment << 4);
+    memset(block, 0, 1024);
+    memcpy(block, "VBE2", 4);
+    memset(&rm, 0, sizeof(rm));
+    rm.eax = 0x4f00;
+    rm.es = (unsigned short)segment;
+    rm.edi = 0;
+    if (!vbe_call(&rm) || memcmp(block, "VESA", 4)) {
+        puts("DOS: VESA unavailable: no VBE BIOS");
+    } else {
+        unsigned version = read16(block + 4);
+        const unsigned short *modes = (const unsigned short *)
+            (((unsigned long)read16(block + 16) << 4) + read16(block + 14));
+        /* Mode info goes to the second half of the buffer, so it cannot
+           overwrite the info block, which may hold the mode list. */
+        unsigned char *mode_info = block + 512;
+        found = vbe_mode_usable(0x101, segment, 512, mode_info);
+        for (i = 0; !found && i < 256 && modes[i] != 0xffffU; ++i)
+            if (modes[i] != 0x101) found = vbe_mode_usable(modes[i], segment, 512, mode_info);
+        if (!found)
+            printf("DOS: VESA unavailable: VBE %u.%u has no usable 640x480 256-color mode\n",
+                   version >> 8, version & 0xff);
+    }
+    memset(&r, 0, sizeof(r));
+    r.x.eax = 0x0101;                       /* DPMI free DOS memory */
+    r.w.dx = (unsigned short)selector;
+    int386(0x31, &r, &r);
+    return found;
+}
+
+static void vbe_set_bank(unsigned bank)
+{
+    union REGS r;
+    if (bank == vesa_bank) return;
+    memset(&r, 0, sizeof(r));
+    r.w.ax = 0x4f05;                        /* window A, set position */
+    r.w.bx = 0;
+    r.w.dx = (unsigned short)bank;
+    int386(0x10, &r, &r);
+    vesa_bank = bank;
+}
+
+/* Copy bytes to (or from) VRAM through window A. */
+static void vesa_copy(unsigned long address, unsigned char *data, unsigned length, int write)
+{
+    while (length) {
+        unsigned bank = (unsigned)(address / vesa_granularity);
+        unsigned long offset = address - (unsigned long)bank * vesa_granularity;
+        unsigned chunk = (unsigned)MIN((unsigned long)length, vesa_window_size - offset);
+        vbe_set_bank(bank);
+        /* memcpy compiles to rep movsd: four pixels per bus transfer. Byte
+           writes were slower than mode 12h's planar writes on the i740. */
+        if (write) memcpy((void *)(vesa_window + offset), data, chunk);
+        else memcpy(data, (const void *)(vesa_window + offset), chunk);
+        address += chunk;
+        data += chunk;
+        length -= chunk;
+    }
+}
+
+/* Redraw the pointer rows from the frame buffer, with the arrow on top
+   when draw is set. Pixels outside the frame buffer are black. */
+static void cursor_paint(int x0, int y0, int draw)
+{
+    unsigned char row[CURSOR_W];
+    const unsigned char *src = (const unsigned char *)info.buffer;
+    int x, y, w;
+    if (x0 < 0 || y0 < 0 || !src) return;
+    for (y = y0; y < y0 + CURSOR_H && y < 480; ++y) {
+        w = MIN(CURSOR_W, 640 - x0);
+        if (w <= 0) return;
+        for (x = 0; x < w; ++x) {
+            char c = draw ? cursor_shape[y - y0][x] : '.';
+            if (c == 'B') row[x] = CURSOR_BLACK;
+            else if (c == 'W') row[x] = CURSOR_WHITE;
+            else if (x0 + x < info.width && y < info.height)
+                row[x] = src[y * info.width + x0 + x];
+            else row[x] = 0;
+        }
+        vesa_copy((unsigned long)y * vesa_pitch + x0, row, (unsigned)w, TRUE);
+    }
+}
+
+/* Called by the mouse code with the new pointer position. */
+void dos_graph_mouse_moved(int x, int y)
+{
+    if (!vesa_active || (x == cursor_x && y == cursor_y && cursor_shown)) return;
+    if (cursor_shown) cursor_paint(cursor_x, cursor_y, FALSE);
+    cursor_x = x;
+    cursor_y = y;
+    cursor_paint(cursor_x, cursor_y, TRUE);
+    cursor_shown = TRUE;
+}
+
+int dos_graph_vesa_active(void) { return vesa_active; }
+
+/* Enter the VESA mode and clear the 640x480 screen. */
+static int vesa_enter(void)
+{
+    union REGS r;
+    unsigned char zero[640];
+    unsigned y;
+    memset(&r, 0, sizeof(r));
+    r.w.ax = 0x4f02;
+    r.w.bx = (unsigned short)vesa_mode;
+    int386(0x10, &r, &r);
+    if (r.w.ax != 0x004f) return FALSE;
+    vesa_bank = 0xffffU;
+    memset(zero, 0, sizeof(zero));
+    for (y = 0; y < 480; ++y) vesa_copy((unsigned long)y * vesa_pitch, zero, 640, TRUE);
+    printf("DOS: VESA mode %03Xh 640x480 256 colors; window %lu KiB, granularity %lu KiB, pitch %u\n",
+           vesa_mode, vesa_window_size / 1024UL, vesa_granularity / 1024UL, vesa_pitch);
+    return TRUE;
 }
 
 const T_GRAPH_SPEC *graph_init(void)
@@ -181,6 +414,18 @@ const T_GRAPH_INFO *graph_setup(int width, int height, int fullscreen, double as
     if (width <= 0 || width > 640 || (width & 7) || height <= 0 || height > 480) return NULL;
     buffer = calloc((size_t)width * height, bytes);
     if (!buffer) return NULL;
+    if (dos_vga && !active && dos_vesa && vbe_find_mode()) {
+        active = TRUE;
+        restored = FALSE;
+        if (vesa_enter()) {
+            vesa_active = vesa_used = TRUE;
+            program_dac();
+            remap_pending = FALSE;
+        } else {
+            puts("DOS: VESA mode set failed; using VGA mode 12h");
+            active = FALSE;
+        }
+    }
     if (dos_vga && !active) {
         active = TRUE;
         restored = FALSE;
@@ -197,7 +442,7 @@ const T_GRAPH_INFO *graph_setup(int width, int height, int fullscreen, double as
         remap_pending = FALSE;
         set_planar_write_mode();
     }
-    if (active) {
+    if (active && !vesa_active) {
         outpw(0x3c4, 0x0f02);
         for (i = 0; i < 38400; ++i) vram[i] = 0;
     }
@@ -215,6 +460,8 @@ const T_GRAPH_INFO *graph_setup(int width, int height, int fullscreen, double as
 void graph_exit(void)
 {
     restore_mode();
+    vesa_active = FALSE;
+    cursor_shown = FALSE;
     free(info.buffer);
     memset(&info, 0, sizeof(info));
 }
@@ -227,8 +474,8 @@ void graph_add_color(const PC88_PALETTE_T colors[], int count, unsigned long pix
                         ((unsigned long)(colors[i].green >> 2) << 5) | (colors[i].blue >> 3);
             continue;
         }
-        while (slot < LOGICAL_COLORS && logical[slot].used) ++slot;
-        if (slot == LOGICAL_COLORS) {
+        while (slot < CURSOR_BLACK && logical[slot].used) ++slot;
+        if (slot == CURSOR_BLACK) {
             pixels[i] = 0;                 /* the core requests at most 214 */
             continue;
         }
@@ -249,12 +496,41 @@ static unsigned char pack_pixels(const unsigned char *src, int plane)
         value |= ((logical_to_dac[src[bit]] >> plane) & 1) << (7 - bit);
     return value;
 }
+/* VESA: the frame buffer bytes are the DAC indices, so updated rows are
+   copied as they are. */
+static void vesa_update(int count, T_GRAPH_RECT rect[])
+{
+    int n, y, left, right, top, bottom, cover = FALSE;
+    unsigned char *src = (unsigned char *)info.buffer;
+    if (remap_pending) {
+        program_dac();
+        remap_pending = FALSE;
+    }
+    for (n = 0; n < count; ++n) {
+        left = MAX(0, rect[n].x);
+        right = MIN(info.width, rect[n].x + rect[n].w);
+        top = MAX(0, rect[n].y);
+        bottom = MIN(info.height, rect[n].y + rect[n].h);
+        if (left >= right) continue;
+        for (y = top; y < bottom; ++y)
+            vesa_copy((unsigned long)y * vesa_pitch + left, src + y * info.width + left,
+                      (unsigned)(right - left), TRUE);
+        if (cursor_shown && cursor_x < right && cursor_x + CURSOR_W > left &&
+            cursor_y < bottom && cursor_y + CURSOR_H > top) cover = TRUE;
+    }
+    if (cover) cursor_paint(cursor_x, cursor_y, TRUE);
+}
+
 void graph_update(int count, T_GRAPH_RECT rect[])
 {
     int p, n, x, y, left, right, top, bottom;
     const unsigned char *src = (const unsigned char *)info.buffer;
     T_GRAPH_RECT whole;
     if (!active || !src) return;
+    if (vesa_active) {
+        vesa_update(count, rect);
+        return;
+    }
     if (remap_pending) {
         /* Load the new DAC and redraw everything with the new mapping. */
         program_dac();
@@ -291,6 +567,21 @@ int dos_graph_verify(void)
     const unsigned char *src = (const unsigned char *)info.buffer;
     if (!active || !src) return FALSE;
     if (remap_pending) graph_update(0, NULL);   /* apply a deferred remap */
+    if (vesa_active) {
+        /* Compare VRAM with the buffer, outside the pointer. */
+        unsigned char row[640];
+        if (!vesa_readable) return TRUE;
+        for (y = 0; y < info.height; ++y) {
+            vesa_copy((unsigned long)y * vesa_pitch, row, (unsigned)info.width, FALSE);
+            for (x = 0; x < info.width; ++x) {
+                if (cursor_shown && x >= cursor_x && x < cursor_x + CURSOR_W &&
+                    y >= cursor_y && y < cursor_y + CURSOR_H) continue;
+                if (src[y * info.width + x]) lit = TRUE;
+                if (row[x] != src[y * info.width + x]) ok = FALSE;
+            }
+        }
+        return ok && lit;
+    }
     dos_mouse_video_update_begin();
     for (p = 0; p < 4; ++p) {
         outpw(0x3ce, (p << 8) | 4);

@@ -203,6 +203,20 @@ corresponding Windows PCM log for duration comparison. Continue this
 investigation in DOSBox-X, examining PCM scaling/quantization and tone timing
 separately. Do not infer physical sound-card behavior from these tests.
 
+2026-09-30: the 8-bit conversion truncated with `mono >> 8`, which floors every
+negative sample in -255..-1 to -1 LSB while positives up to 255 stay at center.
+The 22,222 Hz log shows this: 88,273 non-silent input samples but only 53,723
+non-center DMA bytes. A quiet or decaying tone therefore became a lopsided
+half-wave pulse train that lasted until the 16-bit input reached exactly zero,
+which matches the reported longer tone, rough fade, and radio-like noise. The
+backend now rounds to the nearest 8-bit step and clamps at +127. The Machine
+target rebuilt with no new warnings, and the 60-frame `-SoundTest` DOSBox-X
+regression at 12,000 cycles passed. That ROM run was silent, so the audible
+`T32L1C` comparison still has to be repeated by ear. The tone peaks near
+four 8-bit steps, and the Ys I run peaked at 24,244 with the current gain, so
+raising the gain would clip game music. Some quantization noise on very quiet
+tones is inherent to 8-bit output.
+
 The active backend uses a 32 KiB DMA ring with a 16 KiB initial lead and carries
 fractional samples across frames to keep its producer rate aligned with the
 selected DSP rate. `PCMZERO.BAT` sends unsigned 8-bit center samples while

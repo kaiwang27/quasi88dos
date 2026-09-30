@@ -378,7 +378,15 @@ int osd_update_audio_stream(INT16 *buffer)
         if (magnitude > pcm_peak) pcm_peak = magnitude;
         ++pcm_samples_total;
         if (mono != 0) ++pcm_samples_non_silent;
-        sample = dos_pcm_zero ? 128 : (unsigned char)((mono >> 8) + 128);
+        /* Round to the nearest 8-bit step. Truncating with a plain shift
+           floors every small negative value to -1 LSB, turning a quiet or
+           decaying tone into a lingering half-wave buzz. */
+        if (dos_pcm_zero) sample = 128;
+        else {
+            int rounded = (mono + 128) >> 8;
+            if (rounded > 127) rounded = 127;
+            sample = (unsigned char)(rounded + 128);
+        }
         if (sample != 128) ++pcm_dma_samples_non_silent;
         sb_dma_buffer[sb_write_pos] = sample;
         sb_write_pos = (sb_write_pos + 1) & (SB_DMA_BYTES - 1);
